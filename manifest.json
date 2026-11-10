@@ -1,0 +1,12 @@
+{
+    "display_name": "레모나 도우미 (Lemona Companion)",
+    "loading_order": 100,
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "KKANG000",
+    "version": "1.0.0",
+    "homePage": "",
+    "auto_update": true,
+    "minimum_client_version": "1.13.0"
+}
