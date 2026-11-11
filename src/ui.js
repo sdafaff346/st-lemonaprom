@@ -6,12 +6,13 @@ import { listProfiles } from './api.js';
 import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, undoFix } from './bans.js';
 import { clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
 import { refreshInjection } from './inject.js';
-import { analyzeCurrentCharacter, buildInsightPrompt, deleteProfile, emptyPair, LAYER_FIELDS, loadProfile, normalizeProfile, saveProfile } from './insight.js';
+import { syncModelToggles } from './autotoggle.js';
+import { analyzeCurrentCharacter, buildInsightPrompt, deleteProfile, emptyPair, emptyRelation, LAYER_FIELDS, loadProfile, normalizeProfile, saveProfile } from './insight.js';
 import { readMvuState } from './mvu.js';
-import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
+import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 
 // ================================================================ small building blocks
 
@@ -100,14 +101,14 @@ function editorHtml(draft, charName, unsaved) {
     const recChips = recommendSummary(rec);
     const recHtml = rec
         ? `<section class="lmc-sec">
-            <h4><span class="lmc-num">3</span>레모나 토글 추천</h4>
+            <h4><span class="lmc-num">4</span>레모나 토글 추천</h4>
             <div class="lmc-chips">${recChips.length ? recChips.map(c => `<span class="lmc-chip lmc-chip-lemon">${esc(c)}</span>`).join('') : '<span class="lmc-chip">추가로 켤 것 없음</span>'}</div>
             ${rec.reason ? `<p class="lmc-hint">${esc(rec.reason)}</p>` : ''}
             <div class="lmc-diff" data-rec-diff></div>
             <button type="button" class="lmc-btn lmc-btn-leaf" data-apply-rec><i class="fa-solid fa-wand-magic-sparkles"></i> 추천대로 토글 바꾸기</button>
         </section>`
         : '';
-    const body = `
+    let body = `
         <p class="lmc-note-box">라벨 대신 <b>행동 문장</b>으로 적어 주세요. <span class="lmc-strike">공정함</span> → 남이 새치기하면 참지 않고 지적한다</p>
         <section class="lmc-sec">
             <h4><span class="lmc-num">1</span>겉과 속</h4>
@@ -123,11 +124,22 @@ function editorHtml(draft, charName, unsaved) {
             <div data-pairs></div>
             <button type="button" class="lmc-btn lmc-btn-ghost" data-add-pair><i class="fa-solid fa-plus"></i> 가치 쌍 추가</button>
         </section>
+        <section class="lmc-sec">
+            <h4><span class="lmc-num">3</span>사람에 따라 <small data-rel-count></small></h4>
+            <p class="lmc-hint">이 사람 앞에서만 겉이나 속이 다르게 드러나는 방식이에요. 그 사람이 장면에 있을 때만 써요.</p>
+            <div data-relations></div>
+            <button type="button" class="lmc-btn lmc-btn-ghost" data-add-rel><i class="fa-solid fa-plus"></i> 사람 추가</button>
+        </section>
         ${recHtml}
         <details class="lmc-preview">
             <summary>AI에게 들어가는 프롬프트 미리보기</summary>
             <pre data-preview></pre>
         </details>`;
+    const lore = draft.lore;
+    const loreLine = lore?.used
+        ? `<p class="lmc-lore-line"><i class="fa-solid fa-book-atlas"></i> 로어북 ${lore.used}개 항목도 같이 읽었어요${lore.books.length ? `<small>${lore.books.map(esc).join(' · ')}</small>` : ''}</p>`
+        : '';
+    body = loreLine + body;
     const sub = `${esc(charName)}${unsaved ? ' <span class="lmc-pill lmc-pill-new">새 분석 · 저장 전</span>' : ''}`;
     return popupFrame('캐릭터 해석', sub, body, 'lmc-editor');
 }
@@ -157,6 +169,20 @@ function pairHtml(p, i) {
     </div>`;
 }
 
+function relationHtml(r, i) {
+    return `
+    <div class="lmc-rel" data-rel="${i}">
+        <div class="lmc-rel-head">
+            <input class="lmc-input lmc-rel-who" maxlength="${LIMITS.who}" placeholder="이름 (예: 여동생 하린)" data-rf="who" value="${esc(r.who)}" />
+            <button type="button" class="lmc-icon-btn" title="이 사람 삭제" aria-label="이 사람 삭제" data-del-rel><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+        <div class="lmc-field">
+            <div class="lmc-field-head"><b>이 사람 앞에서</b><span class="lmc-count" data-count="shows"></span></div>
+            <textarea class="lmc-input lmc-textarea" rows="2" maxlength="${LIMITS.relation}" placeholder="예: 이 사람한테만 존댓말을 놓는다. 감춰 둔 두려움이 과보호로 새어 나온다." data-rf="shows">${esc(r.shows)}</textarea>
+        </div>
+    </div>`;
+}
+
 function bindEditor(root, draft) {
     const q = sel => root.querySelector(sel);
     const updatePreview = () => {
@@ -182,6 +208,12 @@ function bindEditor(root, draft) {
         q('[data-count="base_crack"]').textContent = String(draft.base_crack);
         q('[data-pair-count]').textContent = `${draft.pairs.length}/${LIMITS.max_pairs}`;
         q('[data-add-pair]').style.display = draft.pairs.length >= LIMITS.max_pairs ? 'none' : '';
+        q('[data-rel-count]').textContent = `${draft.relations.length}/${LIMITS.max_relations}`;
+        q('[data-add-rel]').style.display = draft.relations.length >= LIMITS.max_relations ? 'none' : '';
+        root.querySelectorAll('[data-rel]').forEach(el => {
+            const r = draft.relations[Number(el.dataset.rel)];
+            if (r) el.querySelector('[data-count="shows"]').textContent = `${r.shows.length}/${LIMITS.relation}`;
+        });
         root.querySelectorAll('[data-pair]').forEach(el => {
             const p = draft.pairs[Number(el.dataset.pair)];
             if (!p) return;
@@ -198,9 +230,15 @@ function bindEditor(root, draft) {
         updateCounts();
         updatePreview();
     };
+    const renderRelations = () => {
+        q('[data-relations]').innerHTML = draft.relations.length ? draft.relations.map(relationHtml).join('') : '<p class="lmc-empty">따로 적을 사람이 없어요.</p>';
+        updateCounts();
+        updatePreview();
+    };
     root.addEventListener('input', e => {
         const t = e.target;
         if (t.dataset.layer) draft.layers[t.dataset.layer] = t.value;
+        else if (t.dataset.rf) draft.relations[Number(t.closest('[data-rel]').dataset.rel)][t.dataset.rf] = t.value;
         else if (t.hasAttribute('data-base-crack')) draft.base_crack = Number(t.value);
         else if (t.dataset.pf) {
             const p = draft.pairs[Number(t.closest('[data-pair]').dataset.pair)];
@@ -216,6 +254,12 @@ function bindEditor(root, draft) {
         } else if (e.target.closest('[data-del-pair]')) {
             draft.pairs.splice(Number(e.target.closest('[data-pair]').dataset.pair), 1);
             renderPairs();
+        } else if (e.target.closest('[data-add-rel]')) {
+            if (draft.relations.length < LIMITS.max_relations) draft.relations.push(emptyRelation());
+            renderRelations();
+        } else if (e.target.closest('[data-del-rel]')) {
+            draft.relations.splice(Number(e.target.closest('[data-rel]').dataset.rel), 1);
+            renderRelations();
         } else if (e.target.closest('[data-apply-rec]')) {
             const n = await setToggles(recommendationChanges(draft.recommend));
             toast(n ? 'success' : 'info', n ? `토글 ${n}개를 바꿨어요.` : '바꿀 토글이 없어요.');
@@ -224,6 +268,7 @@ function bindEditor(root, draft) {
     });
     q('details.lmc-preview').addEventListener('toggle', updatePreview);
     renderPairs();
+    renderRelations();
     updateRecDiff();
 }
 
@@ -239,15 +284,21 @@ export async function runAnalysis() {
     const cur = requireCharacter();
     if (!cur) return;
     const result = await guarded('analyze', async () => {
-        const pending = toast('info', `${cur.char.name} 카드를 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
+        let pending = toast('info', `${cur.char.name} 카드를 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
-            return await analyzeCurrentCharacter();
+            return await analyzeCurrentCharacter({
+                onLore: lore => {
+                    if (!lore.used) return;
+                    toastr.clear(pending);
+                    pending = toast('info', `${cur.char.name} 카드와 로어북 ${lore.used}개 항목을 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
+                },
+            });
         } finally {
             toastr.clear(pending);
         }
     });
     if (result) {
-        toast('success', '분석 완료. 내용을 확인하고 저장해 주세요.');
+        toast('success', result.lore?.used ? `분석 완료 (로어북 ${result.lore.used}개 항목 포함). 내용을 확인하고 저장해 주세요.` : '분석 완료. 내용을 확인하고 저장해 주세요.');
         await openEditor(result, true);
     }
 }
@@ -260,7 +311,14 @@ export async function openEditor(initial = null, unsaved = false) {
     const RE_ANALYZE = POPUP_RESULT.CUSTOM1;
     const DELETE = POPUP_RESULT.CUSTOM2;
     const base = initial ?? loadProfile() ?? normalizeProfile({});
-    const draft = { layers: { ...base.layers }, pairs: base.pairs.map(p => ({ ...p })), base_crack: base.base_crack, recommend: base.recommend };
+    const draft = {
+        layers: { ...base.layers },
+        pairs: base.pairs.map(p => ({ ...p })),
+        relations: (base.relations ?? []).map(r => ({ ...r })),
+        base_crack: base.base_crack,
+        recommend: base.recommend,
+        lore: base.lore,
+    };
     let dirty = unsaved;
 
     const popup = new Popup(editorHtml(draft, cur.char.name, unsaved), POPUP_TYPE.TEXT, '', {
@@ -281,6 +339,7 @@ export async function openEditor(initial = null, unsaved = false) {
         onClosing: async p => {
             if (p.result === POPUP_RESULT.AFFIRMATIVE) {
                 if (draft.pairs.some(x => (x.a || x.b) && !(x.a && x.b))) toast('warning', 'A와 B를 둘 다 적지 않은 가치 쌍은 저장되지 않아요.');
+                if (draft.relations.some(x => (x.who || x.shows) && !(x.who && x.shows))) toast('warning', '이름과 내용을 둘 다 적지 않은 사람은 저장되지 않아요.');
                 return true;
             }
             if (p.result === DELETE) return (await Popup.show.confirm('캐릭터 해석 삭제', `${esc(cur.char.name)}의 캐릭터 해석을 삭제할까요?`)) === POPUP_RESULT.AFFIRMATIVE;
@@ -336,11 +395,12 @@ function togglesHtml() {
             </div>`;
         })
         .join('');
+    const auto = getSettings().model_auto_toggle ? modelToggleIds() : new Set();
     const optRows = optional
         .map(
             o => `
             <label class="lmc-opt${o.enabled ? ' is-on' : ''}">
-                <span class="lmc-opt-name">${esc(o.name)}</span>
+                <span class="lmc-opt-name">${esc(o.name)}${auto.has(o.id) ? '<span class="lmc-pill lmc-pill-auto">모델 따라 자동</span>' : ''}</span>
                 <span class="lmc-switch lmc-switch-sm"><input type="checkbox" data-opt="${esc(o.id)}" ${o.enabled ? 'checked' : ''} /><i aria-hidden="true"></i></span>
             </label>`,
         )
@@ -348,7 +408,7 @@ function togglesHtml() {
     const charBlock = cur
         ? `<section class="lmc-sec lmc-sec-char">
             <h4><i class="fa-solid fa-user"></i> ${esc(cur.char.name)} 전용 세트</h4>
-            <p class="lmc-hint">${saved ? '저장된 세트가 있어요. 이 캐릭터 채팅을 열면 자동으로 적용돼요.' : '저장된 세트가 없어요. 지금 토글을 이 캐릭터용으로 저장해 두면 다음부터 자동으로 바뀌어요.'}</p>
+            <p class="lmc-hint">${saved ? '저장된 세트가 있어요. 이 캐릭터 채팅을 열 때, 그리고 프리셋을 다시 불러올 때(연결 프로필 전환 포함) 자동으로 적용돼요.' : '저장된 세트가 없어요. 지금 토글을 이 캐릭터용으로 저장해 두면 다음부터 자동으로 바뀌어요.'} 🔷 Argon·🔶 Carbon 호환은 세트에 넣지 않고 모델을 따라가요.</p>
             <div class="lmc-btn-row">
                 <button type="button" class="lmc-btn lmc-btn-lemon" data-save-char><i class="fa-solid fa-floppy-disk"></i> 지금 토글 저장</button>
                 ${saved ? '<button type="button" class="lmc-btn lmc-btn-ghost" data-clear-char><i class="fa-solid fa-eraser"></i> 세트 지우기</button>' : ''}
@@ -487,7 +547,11 @@ function settingsHtml() {
         </div>
         ${switchRow('lmc_insight_enabled', '답변 생성 때 넣기', '레모나에선 「👤 현실적·캐해」 바로 뒤')}
         ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '「🔍 추론」 체크리스트 끝에 한 줄')}
-        ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}`,
+        ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}
+        <div class="lmc-subhead"><i class="fa-solid fa-book-atlas"></i> 로어북</div>
+        ${switchRow('lmc_lore_enabled', '로어북도 같이 분석', '캐릭터·채팅 로어북의 켜진 항목. 변수·상태창 항목은 빼요')}
+        ${switchRow('lmc_lore_global', '전역 로어북도 넣기', '전역·페르소나 로어북까지 읽어요')}
+        ${numberRow('lmc_lore_budget', '로어북 최대 글자 수', 2000, 60000, 1000, '넘치면 캐릭터 이름이 나오는 항목부터 넣어요')}`,
         true,
     );
     const toggles = card(
@@ -495,7 +559,9 @@ function settingsHtml() {
         '토글 도우미',
         '택1 · 캐릭터별 세트',
         `<div class="lmc-btn-row"><button type="button" id="lmc_toggles" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-sliders"></i> 토글 열기</button></div>
-        ${switchRow('lmc_toggles_auto', '캐릭터별 세트 자동 적용', '저장해 둔 세트를 채팅 열 때 바꿔요')}`,
+        ${switchRow('lmc_toggles_auto', '캐릭터별 세트 자동 적용', '채팅 열 때, 프리셋을 다시 불러올 때')}
+        ${switchRow('lmc_model_auto', '모델 따라 🔷/🔶 자동 전환', 'Argon이면 🔷, Carbon이면 🔶만 켜요')}
+        ${switchRow('lmc_model_other_off', '다른 모델이면 둘 다 끄기', '3.8 Flash 같은 모델일 때')}`,
     );
     const bans = card(
         '🚫',
@@ -672,6 +738,19 @@ function bindSettings() {
     check('#lmc_insight_think', 'insight_think_line');
     num('#lmc_insight_depth', 'insight_fallback_depth', 0, 20);
     check('#lmc_toggles_auto', 'toggles_auto_apply');
+    check('#lmc_lore_enabled', 'lore_enabled');
+    check('#lmc_lore_global', 'lore_include_global');
+    num('#lmc_lore_budget', 'lore_budget', 2000, 60000);
+    for (const [id, key] of [['#lmc_model_auto', 'model_auto_toggle'], ['#lmc_model_other_off', 'model_other_off']]) {
+        $(id)
+            .prop('checked', !!s[key])
+            .on('change', async function () {
+                s[key] = $(this).prop('checked');
+                saveSettings();
+                if (s.model_auto_toggle) await syncModelToggles({ force: true });
+                updateStatus();
+            });
+    }
     check('#lmc_bans_enabled', 'bans_enabled');
     check('#lmc_bans_highlight', 'bans_highlight');
     check('#lmc_bans_auto', 'bans_auto_fix');

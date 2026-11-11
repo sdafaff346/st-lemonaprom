@@ -7,7 +7,7 @@ export const META_KEY = 'lemona_companion'; // chat metadata key
 export const MVU_KEY = '캐해';
 export const LOG = '[레모나]';
 
-export const LIMITS = Object.freeze({ layer: 160, side: 24, pair_text: 160, max_pairs: 3, recent: 120 });
+export const LIMITS = Object.freeze({ layer: 160, side: 24, pair_text: 160, max_pairs: 3, recent: 120, who: 24, relation: 160, max_relations: 3 });
 
 // extension_prompt_types / extension_prompt_roles from script.js (not exported via getContext)
 export const PROMPT_TYPE = Object.freeze({ NONE: -1, IN_PROMPT: 0, IN_CHAT: 1 });
@@ -28,6 +28,11 @@ export const defaultSettings = Object.freeze({
     insight_fallback_depth: 4,
     insight_think_line: true,
 
+    // lorebook in the analysis
+    lore_enabled: true,
+    lore_include_global: false,
+    lore_budget: 12000,
+
     // MVU
     mvu_enabled: true,
     mvu_inject_rules: true,
@@ -36,6 +41,8 @@ export const defaultSettings = Object.freeze({
 
     // preset toggles
     toggles_auto_apply: true,
+    model_auto_toggle: true, // 🔷 Argon / 🔶 Carbon follow the connected model
+    model_other_off: true, // any other model turns both off
 
     // ban checker
     bans_enabled: true,

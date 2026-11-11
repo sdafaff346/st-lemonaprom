@@ -1292,3 +1292,62 @@ mark.lmc-ban-possessive {
         animation: none;
     }
 }
+
+/* ---------------------------------------------------------------- v1.4.0: lorebook, relations, model auto */
+.lmc-ui .lmc-subhead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 12px 0 2px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--lmc-line);
+    font-size: 0.86em;
+    font-weight: 700;
+    color: var(--lmc-leaf-2);
+}
+.lmc-ui .lmc-lore-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    background: var(--lmc-sky);
+    color: var(--lmc-sky-2);
+    border-radius: 12px;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+.lmc-ui .lmc-lore-line small {
+    flex-basis: 100%;
+    font-weight: 400;
+    color: var(--lmc-ink-2);
+    overflow-wrap: anywhere;
+}
+.lmc-ui .lmc-rel {
+    padding: 10px 12px;
+    margin: 0 0 10px;
+    background: #fffef7;
+    border: 1.5px solid var(--lmc-line);
+    border-left: 5px solid var(--lmc-sky-2);
+    border-radius: 14px;
+}
+.lmc-ui .lmc-rel-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.lmc-ui .lmc-rel-head .lmc-input {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+}
+.lmc-ui .lmc-pill-auto {
+    margin-left: 6px;
+    color: var(--lmc-sky-2);
+    background: var(--lmc-sky);
+    border-color: #b9c9e6;
+    font-size: 0.78em;
+    vertical-align: 1px;
+    white-space: nowrap;
+}

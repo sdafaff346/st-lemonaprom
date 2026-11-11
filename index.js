@@ -3,13 +3,15 @@
  *
  * 1. 캐해: two-layer reading + colliding value pairs, spliced after </realism> and into <thinkingProcess>
  * 2. MVU: stat_data.캐해 dynamic layer (mask crack, per-pair lean)
- * 3. 토글 도우미: 택1 groups, health check, per-character toggle sets, analysis-based recommendations
+ * 3. 토글 도우미: 택1 groups, health check, per-character toggle sets, analysis-based recommendations,
+ *    🔷 Argon / 🔶 Carbon following the connected model
  * 4. 금지어 검수: live 「🚫 금지단어」 rules, highlight, AI fix with undo
  * 5. 반복 끊기: chat-specific breaker note built from recurring phrases and AI-found habits
  *
  * UI text is Korean; every string the model reads is English.
  */
 
+import { afterCharacterToggles, flushSettle, registerAutoToggle, scheduleSettle } from './src/autotoggle.js';
 import { decorateMessage, decorateRecent, fixableIssues, fixMessage, scanMessage, stillGenerating } from './src/bans.js';
 import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, state, toast } from './src/core.js';
 import { onPromptReady, refreshInjection } from './src/inject.js';
@@ -115,6 +117,7 @@ async function onChatChanged() {
             console.warn(LOG, 'auto toggle apply failed', e);
         }
     }
+    await afterCharacterToggles();
     applyActiveState({ announce: true });
     setTimeout(() => decorateRecent(openBanReport), 300);
 }
@@ -128,13 +131,23 @@ function init() {
 
     const { eventSource, event_types } = ctx();
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-    eventSource.on(event_types.GENERATION_AFTER_COMMANDS, (type, _opts, dryRun) => {
+    eventSource.on(event_types.GENERATION_AFTER_COMMANDS, async (type, _opts, dryRun) => {
         if (!dryRun) state.lastGenType = type ?? 'normal';
         // In case a preset switch slipped past the preset events, settle the state before sending
         syncActiveState();
+        // SillyTavern awaits this event before building the prompt, so toggles fixed here count now
+        if (!dryRun && type !== 'quiet') {
+            try {
+                await flushSettle();
+            } catch (e) {
+                console.warn(LOG, 'toggle sync before sending failed', e);
+            }
+        }
         refreshInjection();
     });
     eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, onPromptReady);
+    registerAutoToggle();
+    scheduleSettle(); // match 🔷 / 🔶 to whatever model is connected at startup
     eventSource.on(event_types.GENERATION_ENDED, () => {
         state.lastGenType = null;
         updateStatus();

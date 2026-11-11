@@ -97,7 +97,7 @@ export function carbonSettingNotices() {
 }
 
 /** Model id of the main chat API, or '' when it cannot be read. */
-function currentModelName() {
+export function currentModelName() {
     try {
         const c = ctx();
         return String(c.getChatCompletionModel?.() ?? c.chatCompletionSettings?.model ?? '');
@@ -238,7 +238,8 @@ export function healthCheck() {
         out.push({ level: 'warn', text: '🔷 Argon 호환과 🔶 Carbon 호환이 같이 켜져 있어요. Carbon은 Argon "대신" 켜는 항목이라 둘 중 하나만 켜 주세요.' });
     }
     const model = currentModelName();
-    if (model) {
+    // With model auto-switching on, these resolve themselves on the next change or send
+    if (model && !getSettings().model_auto_toggle) {
         if (argon?.enabled && !carbon?.enabled && !/argon/i.test(model)) {
             out.push({ level: 'info', text: `🔷 Argon 호환이 켜져 있는데 지금 모델은 ${model}이에요. Gemini 4 Argon이 아니면 꺼도 돼요.` });
         }
@@ -286,14 +287,65 @@ export function neighbourNotices() {
     return out;
 }
 
+// ---------------------------------------------------------------- model compatibility toggles
+
+/** 🔷 Argon / 🔶 Carbon entries of the active preset (either may be missing, e.g. v7.2.1 has no 🔶). */
+export function modelToggles() {
+    const { optional } = readToggles();
+    return {
+        argon: optional.find(o => o.id === 'lm_argon' || /Argon/i.test(o.name)) ?? null,
+        carbon: optional.find(o => /Carbon/i.test(o.name)) ?? null,
+    };
+}
+
+/** Identifiers that follow the model and so never belong in a per-character set. */
+export function modelToggleIds() {
+    const { argon, carbon } = modelToggles();
+    return new Set([argon?.id, carbon?.id].filter(Boolean));
+}
+
+/** 'argon' | 'carbon' | 'other' for a model id, '' when there is no model to read. */
+export function modelFamily(model) {
+    const m = String(model ?? '');
+    if (!m) return '';
+    if (/carbon/i.test(m)) return 'carbon';
+    if (/argon/i.test(m)) return 'argon';
+    return 'other';
+}
+
+/** Changes that make 🔷 / 🔶 match `model`. Empty when nothing should move. */
+export function modelToggleChanges(model = currentModelName(), settings = getSettings()) {
+    const family = modelFamily(model);
+    const { argon, carbon } = modelToggles();
+    if (!family || (!argon && !carbon)) return {};
+    const changes = {};
+    const set = (entry, on) => {
+        if (entry) changes[entry.id] = on;
+    };
+    if (family === 'argon') {
+        set(argon, true);
+        set(carbon, false);
+    } else if (family === 'carbon') {
+        // A preset without 🔶 (v7.2.1) has nothing for Carbon; leave 🔷 alone rather than guess
+        if (!carbon) return {};
+        set(carbon, true);
+        set(argon, false);
+    } else if (settings.model_other_off) {
+        set(argon, false);
+        set(carbon, false);
+    }
+    return changes;
+}
+
 // ---------------------------------------------------------------- per-character toggle sets
 
 /** Snapshot of all optional toggles (택1 groups + 선택 entries). */
-export function snapshotToggles() {
+export function snapshotToggles({ withModel = false } = {}) {
     const { groups, optional } = readToggles();
+    const skip = withModel ? new Set() : modelToggleIds();
     const snap = {};
     for (const g of groups) for (const o of g.options) snap[o.id] = o.enabled;
-    for (const o of optional) snap[o.id] = o.enabled;
+    for (const o of optional) if (!skip.has(o.id)) snap[o.id] = o.enabled;
     return snap;
 }
 
@@ -309,6 +361,7 @@ export async function applyCharacterToggles({ silent = false } = {}) {
     if (!detectLemona()) return 0;
     const saved = readCharData().toggles;
     if (!saved || typeof saved !== 'object') return 0;
+    // snapshotToggles() leaves out 🔷 / 🔶, so sets saved before v1.4.0 stop overriding the model too
     const known = new Set(Object.keys(snapshotToggles()));
     const changes = Object.fromEntries(Object.entries(saved).filter(([id]) => known.has(id)));
     const n = await setToggles(changes);

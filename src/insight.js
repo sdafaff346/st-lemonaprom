@@ -2,6 +2,7 @@
 
 import { sideGenerate } from './api.js';
 import { cleanText, ctx, ensureFullCharacter, extractJson, getSettings, LIMITS, readCharData, toPercent, writeCharData } from './core.js';
+import { collectLore } from './lore.js';
 import { presetLanguage } from './preset.js';
 
 export const LAYER_FIELDS = Object.freeze([
@@ -17,6 +18,29 @@ const FLAGS = ['harsh', 'gentle', 'romcom', 'angst', 'multi_cast', 'foreign_spea
 
 export function emptyPair() {
     return { a: '', b: '', lean: 50, behavior: '', cost: '' };
+}
+
+export function emptyRelation() {
+    return { who: '', shows: '' };
+}
+
+/** {{user}} is the player; a relation entry for them would steer the player's own scenes. */
+function isUserName(who) {
+    if (/\{\{\s*user\s*\}\}/i.test(who)) return true;
+    let name = '';
+    try {
+        name = String(ctx().name1 ?? '').trim();
+    } catch {
+        /* no context in tests */
+    }
+    return !!name && who.trim() === name;
+}
+
+function normalizeLoreMeta(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const books = (Array.isArray(raw.books) ? raw.books : []).map(b => cleanText(b, 80)).filter(Boolean).slice(0, 12);
+    const used = Math.max(0, Math.round(Number(raw.used) || 0));
+    return books.length || used ? { books, used } : null;
 }
 
 function normalizeRecommendation(raw) {
@@ -47,9 +71,15 @@ export function normalizeProfile(raw) {
         }))
         .filter(p => p.a && p.b)
         .slice(0, LIMITS.max_pairs);
+    const relations = (Array.isArray(src.relations) ? src.relations : [])
+        .map(r => ({ who: cleanText(r?.who, LIMITS.who), shows: cleanText(r?.shows, LIMITS.relation) }))
+        .filter(r => r.who && r.shows && !isUserName(r.who))
+        .slice(0, LIMITS.max_relations);
     return {
         layers,
         pairs,
+        relations,
+        lore: normalizeLoreMeta(src.lore),
         base_crack: toPercent(src.base_crack, 20),
         recommend: normalizeRecommendation(src.recommend ?? src.toggles),
         updated_at: typeof src.updated_at === 'string' ? src.updated_at : '',
@@ -57,7 +87,7 @@ export function normalizeProfile(raw) {
 }
 
 export function isProfileEmpty(profile) {
-    return !profile || (LAYER_FIELDS.every(f => !profile.layers[f.key]) && profile.pairs.length === 0);
+    return !profile || (LAYER_FIELDS.every(f => !profile.layers[f.key]) && profile.pairs.length === 0 && (profile.relations?.length ?? 0) === 0);
 }
 
 export function loadProfile() {
@@ -95,7 +125,7 @@ function languageLine(settings) {
 
 function analysisSystemPrompt(settings) {
     return [
-        "You are a character analyst for interactive fiction. Read the character card and extract the character's inner logic so another writer can keep them consistent yet multi-faceted in situations the card never mentions.",
+        "You are a character analyst for interactive fiction. Read the character card (and its lorebook, when one is given) and extract the character's inner logic so another writer can keep them consistent yet multi-faceted in situations the card never mentions.",
         '',
         'Principles:',
         '- Do NOT use personality-type labels (MBTI, enneagram, zodiac, "tsundere", etc.) or bare adjectives ("cold", "kind").',
@@ -103,6 +133,7 @@ function analysisSystemPrompt(settings) {
         '- Connect motives to causes found in the card when the card gives one. If the card is silent, infer the most plausible cause and keep it modest; do not invent major backstory events.',
         '- Prefer tension: the inner layer should explain or contradict the surface layer, not repeat it.',
         '- Keep the character at the intensity the card writes. Do not soften edges (rudeness, selfishness, cruelty) or add kindness the card does not give.',
+        '- A <lorebook> holds world-info entries tied to this character. Treat it as part of the card: use it for past events, relationships and world rules that explain the motives. The card wins where the two disagree. Do not summarise the lorebook or copy world facts into the output; use it only to ground the inner logic.',
         '',
         'Produce:',
         '1. layers — the two-layer reading:',
@@ -115,8 +146,12 @@ function analysisSystemPrompt(settings) {
         '   - lean: integer 0-100, how strongly they choose a over b by default (100 = always a, 50 = torn).',
         '   - behavior: what they visibly do when the two collide.',
         '   - cost: what follows when they go against their lean (guilt, rationalisation, a habit, a change in tone...).',
-        '3. base_crack: integer 0-100, how much of the inner layer normally leaks through the surface at the start of a story (0 = perfectly masked, 100 = wears their heart on their sleeve).',
-        '4. recommend — which writing-preset switches fit this card:',
+        '3. relations — 0 to 3 people from the card or lorebook who change how the two layers show (family, a rival, a former partner...). Only people the character actually has history with; never {{user}}. For each:',
+        '   - who: their name as the card writes it.',
+        '   - shows: how the surface or the inner layer behaves differently around this person, as behaviour (e.g. "drops the formal speech only with her; the old fear shows as overprotectiveness").',
+        '   Leave the array empty when the card and lorebook name nobody like that.',
+        '4. base_crack: integer 0-100, how much of the inner layer normally leaks through the surface at the start of a story (0 = perfectly masked, 100 = wears their heart on their sleeve).',
+        '5. recommend — which writing-preset switches fit this card:',
         '   - bot_type: "original" (the card\'s own original character), "motif" (inspired by an existing work but not that canon), "korean" / "japanese" / "western" (a fan-work character from an existing Korean / Japanese anime-manga / Western work).',
         '   - canon: the name of the original work for a fan-work character, otherwise "".',
         '   - mood: "none", "slow" (slow-burn flirting), "comedy" (everyday comedy), "tense" (thriller tension) or "work" (case- or job-driven); "none" unless the card clearly sets one.',
@@ -125,11 +160,11 @@ function analysisSystemPrompt(settings) {
         '   - multi_cast: true if the card plays several characters at once. foreign_speaker: true if the character cannot speak the narration language well.',
         '   - reason: one short sentence explaining the picks.',
         '',
-        `Length limits: each layers field under ${LIMITS.layer} characters; a and b under ${LIMITS.side} characters; behavior and cost under ${LIMITS.pair_text} characters.`,
+        `Length limits: each layers field under ${LIMITS.layer} characters; a and b under ${LIMITS.side} characters; behavior and cost under ${LIMITS.pair_text} characters; who under ${LIMITS.who} and shows under ${LIMITS.relation} characters.`,
         languageLine(settings),
         '',
         'Output ONLY one JSON object, no commentary, no code fence, in exactly this shape:',
-        '{"layers":{"surface":"...","desire":"...","fear":"...","self_deception":"..."},"pairs":[{"a":"...","b":"...","lean":70,"behavior":"...","cost":"..."}],"base_crack":20,"recommend":{"bot_type":"original","canon":"","mood":"none","harsh":false,"gentle":false,"romcom":false,"angst":false,"multi_cast":false,"foreign_speaker":false,"reason":"..."}}',
+        '{"layers":{"surface":"...","desire":"...","fear":"...","self_deception":"..."},"pairs":[{"a":"...","b":"...","lean":70,"behavior":"...","cost":"..."}],"relations":[{"who":"...","shows":"..."}],"base_crack":20,"recommend":{"bot_type":"original","canon":"","mood":"none","harsh":false,"gentle":false,"romcom":false,"angst":false,"multi_cast":false,"foreign_speaker":false,"reason":"..."}}',
     ].join('\n');
 }
 
@@ -138,7 +173,8 @@ function clip(value, max) {
     return s.length > max ? `${s.slice(0, max)}\n[...truncated]` : s;
 }
 
-export async function analyzeCurrentCharacter() {
+/** @param {{ onLore?: (lore: {books:string[], used:number, total:number, skipped:number, cut:number}) => void }} [opts] */
+export async function analyzeCurrentCharacter({ onLore } = {}) {
     const cur = await ensureFullCharacter();
     if (!cur) throw new Error('1:1 채팅에서 캐릭터를 연 상태여야 해요.');
     const { char } = cur;
@@ -153,8 +189,13 @@ export async function analyzeCurrentCharacter() {
         ["Creator's notes", clip(pick('creator_notes'), 1500)],
     ].filter(([, v]) => v);
     const card = ctx().substituteParams(`<character_card>\n${sections.map(([k, v]) => `## ${k}\n${v}`).join('\n\n')}\n</character_card>`);
-    const reply = await sideGenerate(analysisSystemPrompt(getSettings()), `${card}\n\nAnalyse this character now. Output the JSON object only.`);
-    const profile = normalizeProfile(extractJson(reply));
+    const settings = getSettings();
+    const lore = await collectLore(char, settings);
+    onLore?.(lore);
+    const input = `${card}${lore.text ? `\n\n${lore.text}` : ''}\n\nAnalyse this character now. Output the JSON object only.`;
+    // The lorebook makes the input longer; give the answer a little more room too
+    const reply = await sideGenerate(analysisSystemPrompt(settings), input, lore.text ? { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, 2500) } : {});
+    const profile = normalizeProfile({ ...extractJson(reply), lore: lore.used ? { books: lore.books, used: lore.used } : null });
     if (isProfileEmpty(profile)) throw new Error('분석 결과가 비어 있어요. 다시 시도해 주세요.');
     return profile;
 }
@@ -203,6 +244,11 @@ export function buildInsightPrompt(profile, mvuState) {
             if (p.cost) out.push(`   Cost of going against the lean: ${p.cost}`);
         });
         if (mvuState?.최근갈등) out.push(`Most recent dilemma: ${mvuState.최근갈등}`);
+    }
+    const relations = profile.relations ?? [];
+    if (relations.length) {
+        out.push('', '[Around key people] Only when this person is present or on {{char}}\'s mind:');
+        for (const r of relations) out.push(`- ${r.who}: ${r.shows}`);
     }
     out.push('', 'Use only the parts this moment actually touches; most replies need one or none. Leans are tendencies, not rules. Contradiction between the layers is intended: keep it alive instead of resolving it.', '</character_insight>');
     return out.join('\n');
