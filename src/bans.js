@@ -3,7 +3,7 @@
 import { sideGenerate } from './api.js';
 import { ctx, esc, extractJson, getSettings, guarded, LOG, maskNonStory, toast } from './core.js';
 import { DEFAULT_BAN_TEXT } from './bans-default.js';
-import { presetPromptContent } from './preset.js';
+import { isActive, presetPromptContent } from './preset.js';
 
 const PARTICLES = ['으로', '이나', '이랑', '처럼', '에게', '한테', '까지', '부터', '은', '는', '이', '가', '을', '를', '도', '만', '의', '에', '과', '와', '로', '나', '랑'];
 const EXACT_ONLY = new Set(['이기', '몰루']); // would collide with ordinary words when particles are stripped
@@ -323,32 +323,49 @@ function highlightTextNodes(root, rules) {
     }
 }
 
+/** Puts the text back the way ST rendered it: removes our marks (merging the split text nodes). */
+function unhighlight(root) {
+    const marks = root?.querySelectorAll('mark.lmc-ban') ?? [];
+    for (const m of marks) {
+        const parent = m.parentNode;
+        m.replaceWith(document.createTextNode(m.textContent));
+        parent?.normalize();
+    }
+}
+
 export function decorateMessage(mesId, onOpen) {
     const el = mesElement(mesId);
     if (!el) return;
     el.querySelectorAll('.lmc-ban-badge').forEach(b => b.remove());
-    const s = getSettings();
-    if (!s.bans_enabled) return;
-    const scan = scanMessage(mesId);
-    if (!scan) return;
     const textEl = el.querySelector('.mes_text');
+    const s = getSettings();
+    const scan = isActive() && s.bans_enabled ? scanMessage(mesId) : null;
     // Another extension (a translator, say) may own what is on screen via extra.display_text.
     // Highlighting that text would mark the wrong words, so only the badge is shown.
-    const owned = displayOwnedByOther(mesId);
-    if (textEl && s.bans_highlight && !owned && !textEl.querySelector('.lmc-ban')) highlightTextNodes(textEl, getRules());
-    if (!scan.issues.length) return;
+    const wantMarks = !!scan && s.bans_highlight && !displayOwnedByOther(mesId);
+    if (!wantMarks) unhighlight(textEl);
+    else if (textEl && !textEl.querySelector('.lmc-ban')) highlightTextNodes(textEl, getRules());
+    if (!scan?.issues.length) return;
 
     const counts = {};
     for (const i of scan.issues) counts[i.type] = (counts[i.type] ?? 0) + 1;
-    const label = Object.entries(counts)
-        .map(([t, n]) => `${TYPE_LABEL[t]} ${n}`)
-        .join(' · ');
     const badge = document.createElement('div');
     badge.className = 'lmc-ban-badge interactable';
     badge.tabIndex = 0;
-    badge.title = '눌러서 자세히 보기 / 고치기';
-    badge.innerHTML = `<i class="fa-solid fa-ban"></i> ${esc(label)}`;
+    badge.setAttribute('role', 'button');
+    badge.title = '눌러서 자세히 보기 · 고치기';
+    badge.innerHTML =
+        '<span class="lmc-ban-badge-dot"></span>' +
+        Object.entries(counts)
+            .map(([t, n]) => `<span class="lmc-ban-badge-part lmc-ban-${t}">${esc(TYPE_LABEL[t])} <b>${n}</b></span>`)
+            .join('');
     badge.addEventListener('click', () => onOpen?.(mesId));
+    badge.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpen?.(mesId);
+        }
+    });
     (textEl ?? el).after(badge);
 }
 

@@ -2,6 +2,7 @@
 
 import { clamp, cleanText, ctx, getSettings, LIMITS, LOG, MVU_KEY, state, toPercent } from './core.js';
 import { loadProfile } from './insight.js';
+import { isActive } from './preset.js';
 
 export function defaultMvuState(profile) {
     return { 가면균열: profile.base_crack, 기울기: profile.pairs.map(p => p.lean), 최근갈등: '' };
@@ -93,7 +94,7 @@ function hookMvu(Mvu, onReady) {
 
     const onInit = variables => {
         const s = getSettings();
-        if (!s.insight_enabled || !s.mvu_enabled || !variables) return;
+        if (!s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
         const profile = loadProfile();
         if (!profile) return;
         variables.stat_data ??= {};
@@ -103,7 +104,7 @@ function hookMvu(Mvu, onReady) {
 
     eventSource.on(ev.VARIABLE_UPDATE_ENDED ?? 'mag_variable_update_ended', (variables, before) => {
         const s = getSettings();
-        if (!s.insight_enabled || !s.mvu_enabled || !variables) return;
+        if (!s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
         const profile = loadProfile();
         if (!profile) return;
         const prev = normalizeMvuState(before?.stat_data?.[MVU_KEY], profile, defaultMvuState(profile));

@@ -14,6 +14,10 @@ export const PROMPT_TYPE = Object.freeze({ NONE: -1, IN_PROMPT: 0, IN_CHAT: 1 })
 export const PROMPT_ROLE = Object.freeze({ system: 0, user: 1, assistant: 2 });
 
 export const defaultSettings = Object.freeze({
+    // master switches
+    enabled: true,
+    lemona_only: true, // sleep automatically on any preset that is not Lemona
+
     // side API
     api_profile: '', // '' = main API
     api_max_tokens: 2000,

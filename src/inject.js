@@ -4,7 +4,7 @@
 import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, state } from './core.js';
 import { buildInsightPrompt, loadProfile, THINK_LINE } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
-import { detectLemona } from './preset.js';
+import { detectLemona, isActive } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
 
 const KEYS = Object.freeze({
@@ -33,6 +33,10 @@ export function clearInjection() {
 /** Extension prompts (everything that is not spliced into the Lemona prompt). Cheap; run before each generation. */
 export function refreshInjection() {
     clearInjection();
+    if (!isActive()) {
+        document.dispatchEvent(new CustomEvent('lemona:injected'));
+        return;
+    }
     const s = getSettings();
     const c = ctx();
     const sub = t => c.substituteParams(t);
@@ -55,7 +59,7 @@ export function refreshInjection() {
 
 /** CHAT_COMPLETION_PROMPT_READY: splice into the assembled Lemona prompt. */
 export function onPromptReady(eventData) {
-    if (state.sideCall || state.lastGenType === 'quiet') return;
+    if (state.sideCall || state.lastGenType === 'quiet' || !isActive()) return;
     const chat = eventData?.chat;
     if (!Array.isArray(chat) || !lemonaChatCompletion()) return;
     const c = ctx();

@@ -1,6 +1,6 @@
 // Reads and switches the Lemona preset's toggles (Prompt Manager entries of the active CC preset).
 
-import { ctx, LOG, readCharData, saveSettings, state, toast, writeCharData } from './core.js';
+import { ctx, getSettings, LOG, readCharData, saveSettings, state, toast, writeCharData } from './core.js';
 
 const GLOBAL_ORDER_ID = 100001; // PromptManager dummyId for the global prompt order
 
@@ -104,6 +104,22 @@ function currentModelName() {
     } catch {
         return '';
     }
+}
+
+/**
+ * Whether the extension should do anything right now: the master switch is on and, when
+ * "레모나 프리셋에서만" is set, the active preset is Lemona.
+ */
+export function isActive() {
+    return inactiveReason() === null;
+}
+
+/** null when active, otherwise 'off' (switched off) or 'not-lemona' (sleeping on another preset). */
+export function inactiveReason() {
+    const s = getSettings();
+    if (!s.enabled) return 'off';
+    if (s.lemona_only && !detectLemona()) return 'not-lemona';
+    return null;
 }
 
 export function detectLemona() {

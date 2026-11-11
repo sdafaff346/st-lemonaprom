@@ -15,9 +15,9 @@ import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, state, to
 import { onPromptReady, refreshInjection } from './src/inject.js';
 import { buildInsightPrompt, loadProfile } from './src/insight.js';
 import { readMvuState, watchForMvu } from './src/mvu.js';
-import { applyCharacterToggles, detectLemona, healthCheck } from './src/preset.js';
+import { applyCharacterToggles, detectLemona, healthCheck, inactiveReason, isActive } from './src/preset.js';
 import { analyzeHabits } from './src/repeat.js';
-import { addMenuButtons, lastReplyId, mountSettings, openBanReport, openEditor, openToggles, runAnalysis, updateStatus } from './src/ui.js';
+import { addMenuButtons, applyActiveState, lastReplyId, mountSettings, openBanReport, openEditor, openToggles, runAnalysis, setPower, syncActiveState, updateStatus } from './src/ui.js';
 
 function decorate(mesId) {
     decorateMessage(Number(mesId), openBanReport);
@@ -25,7 +25,7 @@ function decorate(mesId) {
 
 async function maybeAutoFix(mesId) {
     const s = getSettings();
-    if (!s.bans_enabled || !s.bans_auto_fix) return;
+    if (!isActive() || !s.bans_enabled || !s.bans_auto_fix) return;
     const id = Number(mesId);
     if (id !== lastReplyId()) return;
     const m = ctx().chat?.[id];
@@ -38,7 +38,7 @@ async function maybeAutoFix(mesId) {
 function registerCommand() {
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx();
     if (!SlashCommandParser?.addCommandObject) return;
-    const actions = ['analyze', 'edit', 'toggles', 'check', 'fix', 'habits', 'show', 'health'];
+    const actions = ['analyze', 'edit', 'toggles', 'check', 'fix', 'habits', 'show', 'health', 'on', 'off'];
     SlashCommandParser.addCommandObject(
         SlashCommand.fromProps({
             name: 'lemona',
@@ -47,6 +47,16 @@ function registerCommand() {
             callback: async (_named, unnamed) => {
                 const [action = 'edit', arg] = String(unnamed ?? '').trim().split(/\s+/);
                 const target = arg !== undefined && arg !== '' ? Number(arg) : lastReplyId();
+                if (action === 'on' || action === 'off') {
+                    setPower({ enabled: action === 'on' });
+                    return '';
+                }
+                // Everything else waits while the extension is off or sleeping on another preset
+                const reason = inactiveReason();
+                if (reason && action !== 'health') {
+                    toast('info', reason === 'off' ? '레모나 도우미가 꺼져 있어요. /lemona on 으로 켤 수 있어요.' : '레모나 프리셋이 아니라서 쉬고 있어요.');
+                    return '';
+                }
                 switch (action) {
                     case 'analyze':
                         await runAnalysis();
@@ -72,6 +82,7 @@ function registerCommand() {
                         return p ? ctx().substituteParams(buildInsightPrompt(p, readMvuState(p))) : '';
                     }
                     case 'health':
+                        if (reason) return reason === 'off' ? '레모나 도우미가 꺼져 있어요.' : '레모나 프리셋이 아니라서 쉬고 있어요.';
                         return healthCheck()
                             .map(h => `${h.level === 'warn' ? '⚠' : 'ℹ'} ${h.text}`)
                             .join('\n');
@@ -89,7 +100,7 @@ function registerCommand() {
                 }),
             ],
             helpString:
-                '<div>레모나 도우미. <code>analyze</code> 카드 분석, <code>edit</code> 캐해 편집, <code>toggles</code> 토글 도우미, <code>check [번호]</code> 금지어 검사, <code>fix [번호]</code> AI로 고치기, <code>habits</code> AI 버릇 찾기, <code>show</code> 캐해 주입 텍스트, <code>health</code> 프리셋 점검.</div>',
+                '<div>레모나 도우미. <code>analyze</code> 카드 분석, <code>edit</code> 캐해 편집, <code>toggles</code> 토글 도우미, <code>check [번호]</code> 금지어 검사, <code>fix [번호]</code> AI로 고치기, <code>habits</code> AI 버릇 찾기, <code>show</code> 캐해 주입 텍스트, <code>health</code> 프리셋 점검, <code>on</code> / <code>off</code> 켜기·끄기.</div>',
         }),
     );
 }
@@ -97,15 +108,14 @@ function registerCommand() {
 async function onChatChanged() {
     await ensureFullCharacter();
     detectLemona();
-    if (getSettings().toggles_auto_apply && currentCharacter()) {
+    if (isActive() && getSettings().toggles_auto_apply && currentCharacter()) {
         try {
             await applyCharacterToggles();
         } catch (e) {
             console.warn(LOG, 'auto toggle apply failed', e);
         }
     }
-    refreshInjection();
-    updateStatus();
+    applyActiveState({ announce: true });
     setTimeout(() => decorateRecent(openBanReport), 300);
 }
 
@@ -120,6 +130,8 @@ function init() {
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.GENERATION_AFTER_COMMANDS, (type, _opts, dryRun) => {
         if (!dryRun) state.lastGenType = type ?? 'normal';
+        // In case a preset switch slipped past the preset events, settle the state before sending
+        syncActiveState();
         refreshInjection();
     });
     eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, onPromptReady);
@@ -132,11 +144,8 @@ function init() {
         updateStatus();
     });
     for (const ev of [event_types.OAI_PRESET_CHANGED_AFTER, event_types.SETTINGS_UPDATED].filter(Boolean)) {
-        eventSource.on(ev, () => {
-            detectLemona();
-            refreshInjection();
-            updateStatus();
-        });
+        // Switching presets can wake the extension up or put it to sleep
+        eventSource.on(ev, () => applyActiveState({ announce: true }));
     }
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, async mesId => {
         decorate(mesId);
@@ -157,7 +166,7 @@ function init() {
     });
     refreshInjection();
     decorateRecent(openBanReport);
-    console.info(LOG, 'loaded', detectLemona() ? '(Lemona preset detected)' : '(generic mode)');
+    console.info(LOG, 'loaded', detectLemona() ? '(Lemona preset detected)' : '(generic mode)', isActive() ? '' : `(inactive: ${inactiveReason()})`);
 }
 
 (function boot() {
