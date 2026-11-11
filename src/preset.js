@@ -64,6 +64,27 @@ export function presetPromptContent(id, nameWord) {
     return p?.content ?? '';
 }
 
+/**
+ * Narration language the preset is set to, from the enabled 「🌐 언어 택1」 entry
+ * (e.g. "한국어", "English (US)"), or '' when it cannot be read.
+ */
+export function presetLanguage() {
+    if (!detectLemona()) return '';
+    const group = readToggles().groups.find(g => g.label === '언어');
+    const on = group?.options.filter(o => o.enabled) ?? [];
+    return on.length === 1 ? on[0].label : '';
+}
+
+/** Model id of the main chat API, or '' when it cannot be read. */
+function currentModelName() {
+    try {
+        const c = ctx();
+        return String(c.getChatCompletionModel?.() ?? c.chatCompletionSettings?.model ?? '');
+    } catch {
+        return '';
+    }
+}
+
 export function detectLemona() {
     const order = orderList();
     const ids = new Set(order?.map(e => e.identifier) ?? []);
@@ -152,6 +173,7 @@ export function healthCheck() {
     const out = [];
     if (!detectLemona()) {
         out.push({ level: 'info', text: '지금 프리셋이 레모나가 아니에요. 레모나 연동 기능(추론 체크 줄, 토글 도우미)은 쉬고, 나머지는 일반 모드로 작동해요.' });
+        out.push(...neighbourNotices());
         return out;
     }
     const order = orderList();
@@ -172,19 +194,55 @@ export function healthCheck() {
     const status = byWord('상태창');
     if (messenger?.enabled && status?.enabled) out.push({ level: 'warn', text: '메신저 모드와 상태창이 같이 켜져 있어요. 메신저 모드에서는 상태창을 꺼 주세요.' });
 
-    const argon = optional.find(o => o.id === 'lm_argon');
-    if (argon?.enabled) {
-        const c = ctx();
-        let model = '';
-        try {
-            model = String(c.getChatCompletionModel?.() ?? c.chatCompletionSettings?.model ?? '');
-        } catch {
-            /* ignore */
+    // Argon / Carbon compatibility: alternatives to each other, each for its own Gemini 4 variant
+    const argon = optional.find(o => o.id === 'lm_argon' || /Argon/i.test(o.name));
+    const carbon = optional.find(o => /Carbon/i.test(o.name));
+    if (argon?.enabled && carbon?.enabled) {
+        out.push({ level: 'warn', text: '🔷 Argon 호환과 🔶 Carbon 호환이 같이 켜져 있어요. Carbon은 Argon "대신" 켜는 항목이라 둘 중 하나만 켜 주세요.' });
+    }
+    const model = currentModelName();
+    if (model) {
+        if (argon?.enabled && !carbon?.enabled && !/argon/i.test(model)) {
+            out.push({ level: 'info', text: `🔷 Argon 호환이 켜져 있는데 지금 모델은 ${model}이에요. Gemini 4 Argon이 아니면 꺼도 돼요.` });
         }
-        if (model && !/gemini|argon/i.test(model)) out.push({ level: 'info', text: `🔷 Argon 호환이 켜져 있는데 지금 모델은 ${model}이에요. Gemini 4 Argon이 아니면 꺼도 돼요.` });
+        if (carbon?.enabled && !argon?.enabled && !/carbon/i.test(model)) {
+            out.push({ level: 'info', text: `🔶 Carbon 호환이 켜져 있는데 지금 모델은 ${model}이에요. Gemini 4 Carbon이 아니면 꺼도 돼요.` });
+        }
+        if (/\bargon\b/i.test(model) && !argon?.enabled) out.push({ level: 'info', text: 'Gemini 4 Argon을 쓰고 있어요. 🔷 Argon 호환을 켜면 좋아요.' });
+        if (/\bcarbon\b/i.test(model) && !carbon?.enabled) out.push({ level: 'info', text: 'Gemini 4 Carbon을 쓰고 있어요. 🔶 Carbon 호환을 켜면 좋아요.' });
     }
     if (state.mvu && /Output only the story/.test(presetPromptContent('lm_think'))) {
         out.push({ level: 'info', text: 'MVU 감지: 추론의 "Output only the story" 줄은 확장이 보낼 때마다 "본문 뒤 변수 블록"으로 바꿔서 보내요.' });
+    }
+    out.push(...neighbourNotices());
+    return out;
+}
+
+/** Notes about other installed extensions whose features overlap with ours. */
+export function neighbourNotices() {
+    const out = [];
+    // 코끼리를 생각하지마 registers this interceptor globally
+    if (typeof globalThis.longMemoryInterceptor === 'function') {
+        out.push({
+            level: 'info',
+            text: '「코끼리를 생각하지마」가 있어요. 그쪽 "금지어·반복 표현"과 이 확장의 "반복 끊기"는 같은 일을 따로 해요. 둘 다 쓰면 지시가 겹치니 한쪽만 쓰는 걸 권해요 (코끼리는 기억에서 단어를 빼고, 이 확장은 다음 답변에서 피하게 해요).',
+        });
+    }
+    // ST-Background-Reply keeps replies running after you leave the chat
+    if (document.getElementById('bgr-dock')) {
+        out.push({
+            level: 'info',
+            text: '「백그라운드 답장」이 있어요. 백그라운드로 받은 답변에도 캐해가 그대로 들어가고 금지어 검사도 돌아요. 다만 "새 답변 자동 고치기"는 생성이 끝난 답변에만, 그 채팅을 보고 있을 때만 적용돼요.',
+        });
+    }
+    // A translator or similar owns what the reader sees on some recent message
+    const chat = ctx().chat ?? [];
+    const owned = chat.slice(-20).some(m => m && !m.is_user && typeof m.extra?.display_text === 'string' && m.extra.display_text && m.extra.display_text !== m.mes);
+    if (owned) {
+        out.push({
+            level: 'info',
+            text: '다른 확장이 메시지 화면 표시를 바꾸고 있어요(번역 등). 그런 메시지에는 형광펜을 넣지 않고 배지만 띄워요. 금지어 고치기는 원문에 저장되니, 화면에 보이려면 그 확장을 다시 실행해 주세요.',
+        });
     }
     return out;
 }

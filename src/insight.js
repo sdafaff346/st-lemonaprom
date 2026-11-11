@@ -2,6 +2,7 @@
 
 import { sideGenerate } from './api.js';
 import { cleanText, ctx, ensureFullCharacter, extractJson, getSettings, LIMITS, readCharData, toPercent, writeCharData } from './core.js';
+import { presetLanguage } from './preset.js';
 
 export const LAYER_FIELDS = Object.freeze([
     { key: 'surface', label: '보여주는 모습', help: '남들이 보는 행동' },
@@ -82,6 +83,16 @@ const LANGUAGE_LINE = {
     card: "Write every string value in the same language as the character card's main text.",
 };
 
+/** The one line telling the analyst which language to answer in. */
+function languageLine(settings) {
+    if (settings.output_language === 'preset') {
+        const lang = presetLanguage();
+        if (lang) return `Write every string value in ${lang}, the language this story is narrated in. Keep JSON keys and enum values in English exactly as specified.`;
+        return LANGUAGE_LINE.card;
+    }
+    return LANGUAGE_LINE[settings.output_language] ?? LANGUAGE_LINE.ko;
+}
+
 function analysisSystemPrompt(settings) {
     return [
         "You are a character analyst for interactive fiction. Read the character card and extract the character's inner logic so another writer can keep them consistent yet multi-faceted in situations the card never mentions.",
@@ -115,7 +126,7 @@ function analysisSystemPrompt(settings) {
         '   - reason: one short sentence explaining the picks.',
         '',
         `Length limits: each layers field under ${LIMITS.layer} characters; a and b under ${LIMITS.side} characters; behavior and cost under ${LIMITS.pair_text} characters.`,
-        LANGUAGE_LINE[settings.output_language] ?? LANGUAGE_LINE.ko,
+        languageLine(settings),
         '',
         'Output ONLY one JSON object, no commentary, no code fence, in exactly this shape:',
         '{"layers":{"surface":"...","desire":"...","fear":"...","self_deception":"..."},"pairs":[{"a":"...","b":"...","lean":70,"behavior":"...","cost":"..."}],"base_crack":20,"recommend":{"bot_type":"original","canon":"","mood":"none","harsh":false,"gentle":false,"romcom":false,"angst":false,"multi_cast":false,"foreign_speaker":false,"reason":"..."}}',

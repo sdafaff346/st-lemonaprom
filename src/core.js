@@ -17,7 +17,7 @@ export const defaultSettings = Object.freeze({
     // side API
     api_profile: '', // '' = main API
     api_max_tokens: 2000,
-    output_language: 'ko',
+    output_language: 'preset',
 
     // insight
     insight_enabled: true,

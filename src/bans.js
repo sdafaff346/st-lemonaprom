@@ -165,6 +165,8 @@ export function sentenceRanges(text) {
 
 const EXCLAIM_RE = /(?:라니|다니|하고는)[.!?…]*["'”’]?$/;
 const CONTRAST_RE = /[가-힣]+(?:이|가)\s?아니라[,\s]/;
+const NOT_BUT_RE = /\bnot\s+(?:just\s+|only\s+|merely\s+|simply\s+)?[^.!?]{1,60}?\bbut\s+/i;
+const NEGATED_RE = /\b(?:did|was|were|is|are|am|had|has|have|do|does|could|would|should|will|wo|ca|can)n[o']t\b|\b(?:did|was|were|is|are|am|had|has|have|could|would|should|will|can|does|do)\s+not\b|\bnever\s+\w/i;
 
 /**
  * Full scan of one reply.
@@ -197,14 +199,40 @@ export function scanReply(mes, prevMes = '') {
     const prevMasked = prevMes ? maskNonStory(prevMes) : '';
     const prevExclaim = sentenceRanges(prevMasked).some(r => EXCLAIM_RE.test(prevMasked.slice(r.start, r.end)));
     let exclaimCount = 0;
+    let negRun = []; // consecutive English negated sentences sharing an opening word
+    const flushNegRun = () => {
+        if (negRun.length >= 2) {
+            const first = negRun[0];
+            const last = negRun[negRun.length - 1];
+            issues.push({
+                type: 'structure',
+                word: 'He did not A. He did not B.',
+                note: `부정문 ${negRun.length}문장 연속 (교정 대비 구조)`,
+                index: first.start,
+                length: last.end - first.start,
+                text: mes.slice(first.start, last.end),
+            });
+        }
+        negRun = [];
+    };
     for (const r of sentences) {
         const s = masked.slice(r.start, r.end);
         if (CONTRAST_RE.test(s)) issues.push({ type: 'structure', word: 'A가 아니라 B', note: '교정 대비 구조', index: r.start, length: r.end - r.start, text: mes.slice(r.start, r.end) });
+        if (NOT_BUT_RE.test(s)) issues.push({ type: 'structure', word: 'not A but B', note: '교정 대비 구조', index: r.start, length: r.end - r.start, text: mes.slice(r.start, r.end) });
+        // "He did not A. He did not B. He C." — the ban list names this shape explicitly
+        const opener = s.match(/^["'“”‘’(]*([A-Za-z]+)/)?.[1]?.toLowerCase();
+        if (opener && NEGATED_RE.test(s)) {
+            if (negRun.length && negRun[negRun.length - 1].opener !== opener) flushNegRun();
+            negRun.push({ start: r.start, end: r.end, opener });
+        } else {
+            flushNegRun();
+        }
         if (EXCLAIM_RE.test(s)) {
             exclaimCount++;
             if (exclaimCount > 1 || prevExclaim) issues.push({ type: 'structure', word: '-라니/-다니/-하고는', note: prevExclaim && exclaimCount === 1 ? '직전 답변에도 씀' : '한 답변에 1번까지', index: r.start, length: r.end - r.start, text: mes.slice(r.start, r.end) });
         }
     }
+    flushNegRun();
     issues.sort((a, b) => a.index - b.index);
     return { issues, sentences };
 }
@@ -240,6 +268,28 @@ export function scanMessage(mesId) {
     return scanReply(m.mes, previousReplyText(mesId));
 }
 
+/**
+ * True when extra.display_text holds something other than the raw message, i.e. another
+ * extension (a translator, for instance) decides what the reader sees. ST renders
+ * `extra.display_text ?? mes`, so our edits to `mes` would not show up on their own.
+ */
+/**
+ * True while another extension marks this message as still being produced (a background-reply
+ * job, say). Rewriting it then would fight whoever is filling it in.
+ */
+export function stillGenerating(message) {
+    const extra = message?.extra;
+    if (!extra || typeof extra !== 'object') return false;
+    // ST-Background-Reply tags an in-flight reply with extra.bg_reply and clears it when done
+    return Object.hasOwn(extra, 'bg_reply') && !!extra.bg_reply;
+}
+
+export function displayOwnedByOther(mesId) {
+    const m = ctx().chat?.[mesId];
+    const d = m?.extra?.display_text;
+    return typeof d === 'string' && d.length > 0 && d !== m.mes;
+}
+
 // ---------------------------------------------------------------- DOM: highlight + badge
 
 function mesElement(mesId) {
@@ -248,7 +298,7 @@ function mesElement(mesId) {
 
 function highlightTextNodes(root, rules) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-        acceptNode: n => (n.parentElement?.closest('code, pre, details, .lm-ban, script, style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+        acceptNode: n => (n.parentElement?.closest('code, pre, details, .lmc-ban, script, style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
     const nodes = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
@@ -262,7 +312,7 @@ function highlightTextNodes(root, rules) {
             if (h.index < pos) continue;
             frag.append(text.slice(pos, h.index));
             const mark = document.createElement('mark');
-            mark.className = `lm-ban lm-ban-${h.type}`;
+            mark.className = `lmc-ban lmc-ban-${h.type}`;
             mark.title = `${TYPE_LABEL[h.type]}: ${h.word}`;
             mark.textContent = text.slice(h.index, h.index + h.length);
             frag.append(mark);
@@ -276,13 +326,16 @@ function highlightTextNodes(root, rules) {
 export function decorateMessage(mesId, onOpen) {
     const el = mesElement(mesId);
     if (!el) return;
-    el.querySelectorAll('.lm-ban-badge').forEach(b => b.remove());
+    el.querySelectorAll('.lmc-ban-badge').forEach(b => b.remove());
     const s = getSettings();
     if (!s.bans_enabled) return;
     const scan = scanMessage(mesId);
     if (!scan) return;
     const textEl = el.querySelector('.mes_text');
-    if (textEl && s.bans_highlight && !textEl.querySelector('.lm-ban')) highlightTextNodes(textEl, getRules());
+    // Another extension (a translator, say) may own what is on screen via extra.display_text.
+    // Highlighting that text would mark the wrong words, so only the badge is shown.
+    const owned = displayOwnedByOther(mesId);
+    if (textEl && s.bans_highlight && !owned && !textEl.querySelector('.lmc-ban')) highlightTextNodes(textEl, getRules());
     if (!scan.issues.length) return;
 
     const counts = {};
@@ -291,7 +344,7 @@ export function decorateMessage(mesId, onOpen) {
         .map(([t, n]) => `${TYPE_LABEL[t]} ${n}`)
         .join(' · ');
     const badge = document.createElement('div');
-    badge.className = 'lm-ban-badge interactable';
+    badge.className = 'lmc-ban-badge interactable';
     badge.tabIndex = 0;
     badge.title = '눌러서 자세히 보기 / 고치기';
     badge.innerHTML = `<i class="fa-solid fa-ban"></i> ${esc(label)}`;
@@ -316,7 +369,7 @@ function fixSystemPrompt(rulesText) {
         '- Change as little as possible. Do not add or remove story content, and do not touch words that are not part of the problem.',
         '- Use plain, natural words. Never swap in a rare, odd, or wrong word just to avoid a banned one, and never use one fixed substitute.',
         '- A banned root covers all its derived forms, so the replacement must not reuse the root.',
-        '- A corrective contrast ("A가 아니라 B") is rewritten as a direct statement of B.',
+        '- A corrective contrast is rewritten as a direct statement of what is true: "A가 아니라 B" becomes B, "not A but B" becomes B, and a run of negated sentences ("He did not A. He did not B. He C.") becomes the affirmative action alone.',
         '',
         'Rules:',
         rulesText,
@@ -347,12 +400,19 @@ export async function fixMessage(mesId) {
         const c = ctx();
         const m = c.chat?.[mesId];
         if (!m) return 0;
+        if (stillGenerating(m)) {
+            toast('info', '이 답변은 아직 생성 중이에요. 끝난 뒤에 고쳐 주세요.');
+            return 0;
+        }
         const scan = scanMessage(mesId);
         const targets = scan ? problemSentences(m.mes, scan) : [];
         if (!targets.length) {
             toast('info', '고칠 문장이 없어요.');
             return 0;
         }
+        // The side call takes seconds, and the user may switch chats meanwhile (background-reply
+        // extensions make that normal). Writing then would render and save into the wrong chat.
+        const chatAtStart = c.getCurrentChatId?.();
         const pending = toast('info', `문장 ${targets.length}개 고치는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
             const story = maskNonStory(m.mes).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
@@ -370,19 +430,32 @@ export async function fixMessage(mesId) {
                 mes = mes.slice(0, t.start) + next + mes.slice(t.end);
                 applied++;
             }
+            if (chatAtStart !== undefined && c.getCurrentChatId?.() !== chatAtStart) {
+                toast('warning', '고치는 동안 다른 채팅으로 옮겨서 적용하지 않았어요. 그 채팅으로 돌아가서 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
+                return 0;
+            }
+            if (c.chat?.[mesId] !== m) {
+                toast('warning', '고치는 동안 메시지가 바뀌어서 적용하지 않았어요. 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
+                return 0;
+            }
             if (!applied) {
                 toast('warning', 'AI가 고친 문장을 돌려주지 않았어요. 다시 시도해 주세요.');
                 return 0;
             }
+            const owned = displayOwnedByOther(mesId);
             m.extra ??= {};
             m.extra.lemona_original = m.mes;
             m.mes = mes;
             if (Array.isArray(m.swipes) && m.swipes[m.swipe_id ?? 0] !== undefined) m.swipes[m.swipe_id ?? 0] = mes;
+            // A display_text that was a plain copy of the message is ours to keep in sync;
+            // one another extension transformed is left alone and reported instead.
+            if (typeof m.extra.display_text === 'string' && !owned) m.extra.display_text = mes;
             c.updateMessageBlock(mesId, m);
             await c.saveChat();
             await c.eventSource.emit(c.event_types.MESSAGE_EDITED, mesId);
             const left = fixableIssues(scanMessage(mesId)?.issues ?? []).length;
             toast(left ? 'warning' : 'success', left ? `${applied}문장을 고쳤어요. 아직 ${left}개가 남았어요.` : `${applied}문장을 고쳤어요.`);
+            if (owned) toast('info', '다른 확장이 이 메시지의 화면 표시를 맡고 있어요(번역 등). 고친 내용은 저장됐지만, 화면에 보이려면 그 확장을 다시 실행해 주세요.', '레모나', { timeOut: 12000 });
             return applied;
         } finally {
             toastr.clear(pending);
@@ -395,8 +468,10 @@ export async function undoFix(mesId) {
     const m = c.chat?.[mesId];
     const orig = m?.extra?.lemona_original;
     if (!orig) return false;
+    const owned = displayOwnedByOther(mesId);
     m.mes = orig;
     if (Array.isArray(m.swipes) && m.swipes[m.swipe_id ?? 0] !== undefined) m.swipes[m.swipe_id ?? 0] = orig;
+    if (typeof m.extra.display_text === 'string' && !owned) m.extra.display_text = orig;
     delete m.extra.lemona_original;
     c.updateMessageBlock(mesId, m);
     await c.saveChat();

@@ -10,7 +10,7 @@
  * UI text is Korean; every string the model reads is English.
  */
 
-import { decorateMessage, decorateRecent, fixableIssues, fixMessage, scanMessage } from './src/bans.js';
+import { decorateMessage, decorateRecent, fixableIssues, fixMessage, scanMessage, stillGenerating } from './src/bans.js';
 import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, state, toast } from './src/core.js';
 import { onPromptReady, refreshInjection } from './src/inject.js';
 import { buildInsightPrompt, loadProfile } from './src/insight.js';
@@ -30,6 +30,7 @@ async function maybeAutoFix(mesId) {
     if (id !== lastReplyId()) return;
     const m = ctx().chat?.[id];
     if (!m || m.extra?.lemona_original) return; // already fixed once
+    if (stillGenerating(m)) return; // another extension is still filling this reply in
     const scan = scanMessage(id);
     if (scan && fixableIssues(scan.issues).length) await fixMessage(id);
 }
