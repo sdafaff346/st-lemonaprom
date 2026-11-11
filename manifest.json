@@ -5,8 +5,8 @@
     "js": "index.js",
     "css": "style.css",
     "author": "KKANG000",
-    "version": "1.1.1",
-    "homePage": "",
+    "version": "1.2.0",
+    "homePage": "https://github.com/KKANG000/SillyTavern-Lemona",
     "auto_update": true,
     "minimum_client_version": "1.13.0"
 }

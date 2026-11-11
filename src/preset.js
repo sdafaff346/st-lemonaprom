@@ -75,6 +75,27 @@ export function presetLanguage() {
     return on.length === 1 ? on[0].label : '';
 }
 
+/**
+ * Sampler settings Gemini 4 Carbon needs: frequency and presence penalty at 0 (anything else
+ * is rejected with HTTP 400) and reasoning effort low.
+ */
+export function carbonSettingNotices() {
+    const oai = settingsObj() ?? {};
+    const out = [];
+    // In memory ST keeps these as freq_pen_openai / pres_pen_openai; preset files use the long names
+    const freq = Number(oai.freq_pen_openai ?? oai.frequency_penalty ?? 0);
+    const pres = Number(oai.pres_pen_openai ?? oai.presence_penalty ?? 0);
+    const bad = [freq ? `빈도 페널티 ${freq}` : '', pres ? `존재 페널티 ${pres}` : ''].filter(Boolean);
+    if (bad.length) {
+        out.push({ level: 'warn', text: `Carbon은 페널티가 0이 아니면 400 오류가 나요 (지금 ${bad.join(', ')}). AI 응답 설정에서 빈도·존재 페널티를 둘 다 0으로 바꿔 주세요.` });
+    }
+    const effort = String(oai.reasoning_effort ?? '');
+    if (effort && effort !== 'low' && effort !== 'min') {
+        out.push({ level: 'info', text: `Carbon은 추론 강도(Reasoning Effort)를 low로 두는 걸 권해요 (지금 설정: ${effort}).` });
+    }
+    return out;
+}
+
 /** Model id of the main chat API, or '' when it cannot be read. */
 function currentModelName() {
     try {
@@ -211,6 +232,8 @@ export function healthCheck() {
         if (/\bargon\b/i.test(model) && !argon?.enabled) out.push({ level: 'info', text: 'Gemini 4 Argon을 쓰고 있어요. 🔷 Argon 호환을 켜면 좋아요.' });
         if (/\bcarbon\b/i.test(model) && !carbon?.enabled) out.push({ level: 'info', text: 'Gemini 4 Carbon을 쓰고 있어요. 🔶 Carbon 호환을 켜면 좋아요.' });
     }
+    // Carbon rejects non-zero penalties with HTTP 400, and works best with low reasoning
+    if (carbon?.enabled || /\bcarbon\b/i.test(model)) out.push(...carbonSettingNotices());
     if (state.mvu && /Output only the story/.test(presetPromptContent('lm_think'))) {
         out.push({ level: 'info', text: 'MVU 감지: 추론의 "Output only the story" 줄은 확장이 보낼 때마다 "본문 뒤 변수 블록"으로 바꿔서 보내요.' });
     }
