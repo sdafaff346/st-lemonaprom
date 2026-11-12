@@ -24,6 +24,7 @@ export const defaultSettings = Object.freeze({
     output_language: 'preset',
 
     // insight
+    insight_module: true, // the whole 캐릭터 해석 feature; off = no analysis, no insight prompt, no MVU tracking
     insight_enabled: true,
     insight_fallback_depth: 4,
     insight_think_line: true,

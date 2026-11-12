@@ -23,7 +23,7 @@ function lemonaChatCompletion() {
 /** Profile for the prompt plus how to phrase it: chat version, card version, or card version softened for a long chat. */
 export function insightForPrompt() {
     const s = getSettings();
-    if (!s.insight_enabled || !currentCharacter()) return null;
+    if (!s.insight_module || !s.insight_enabled || !currentCharacter()) return null;
     const active = pickProfile();
     if (!active) return null;
     return { profile: active.profile, opts: { source: active.source, soft: !!s.insight_soft_long && isLongChatOnCard(active, s) } };

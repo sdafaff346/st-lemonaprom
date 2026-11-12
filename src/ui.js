@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 // ================================================================ small building blocks
 
@@ -452,6 +452,12 @@ function bindEditor(root, draft, mode = 'card') {
     updateRecDiff();
 }
 
+function requireInsight() {
+    if (getSettings().insight_module) return true;
+    toast('info', '캐해 기능이 꺼져 있어요. 서랍 🧠 캐릭터 해석에서 「캐해 기능 쓰기」를 켜 주세요.');
+    return false;
+}
+
 function requireActive() {
     const reason = inactiveReason();
     if (!reason) return true;
@@ -464,6 +470,7 @@ export async function runAnalysis({ kind = null } = {}) {
     if (!requireActive()) return;
     const cur = requireCharacter();
     if (!cur) return;
+    if (!requireInsight()) return;
     const result = await guarded('analyze', async () => {
         let pending = toast('info', `${cur.char.name} 카드를 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
@@ -491,6 +498,7 @@ export async function runChatAnalysis() {
     if (!requireActive()) return;
     const cur = requireCharacter();
     if (!cur) return;
+    if (!requireInsight()) return;
     const result = await guarded('analyze', async () => {
         const pending = toast('info', `${cur.char.name}의 지금 모습을 채팅에서 읽는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
@@ -511,7 +519,7 @@ export async function runChatAnalysis() {
  * @param {'card'|'chat'|null} [mode] which version; by default this chat's if it has one
  */
 export async function openEditor(initial = null, unsaved = false, mode = null) {
-    if (!requireActive()) return;
+    if (!requireActive() || !requireInsight()) return;
     const cur = await ensureFullCharacter();
     if (!cur) return requireCharacter();
     const { Popup, POPUP_TYPE, POPUP_RESULT } = ctx();
@@ -612,7 +620,7 @@ function togglesHtml() {
     const { groups, optional } = readToggles();
     const cur = currentCharacter();
     const saved = cur ? readCharData().toggles : null;
-    const rec = cur ? loadProfile()?.recommend : null;
+    const rec = cur && getSettings().insight_module ? loadProfile()?.recommend : null;
     const groupRows = groups
         .map(g => {
             const on = g.options.filter(o => o.enabled);
@@ -773,7 +781,10 @@ function settingsHtml() {
         '🧠',
         '캐릭터 해석',
         '겉과 속 · 가치 · 다인 · 시뮬 · RPG',
-        `<div class="lmc-btn-row">
+        `${switchRow('lmc_insight_module', '캐해 기능 쓰기', '끄면 분석도, 캐해 넣기도, MVU 추적도 안 해요')}
+        <p id="lmc_insight_off" class="lmc-off-note" style="display:none">캐해 기능이 꺼져 있어요. 프롬프트에 캐해를 넣지 않고 분석 버튼도 숨겨요. 저장해 둔 캐해는 지우지 않아요.</p>
+        <div id="lmc_insight_body">
+        <div class="lmc-btn-row">
             <button type="button" id="lmc_analyze" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-wand-magic-sparkles"></i> <span>카드 분석</span></button>
             <button type="button" id="lmc_analyze_chat" class="lmc-btn lmc-btn-leaf"><i class="fa-solid fa-comments"></i> <span>채팅 반영 분석</span></button>
             <button type="button" id="lmc_edit" class="lmc-btn lmc-btn-ghost"><i class="fa-solid fa-pen-to-square"></i> 편집 열기</button>
@@ -792,7 +803,8 @@ function settingsHtml() {
         <div class="lmc-subhead"><i class="fa-solid fa-book-atlas"></i> 로어북</div>
         ${switchRow('lmc_lore_enabled', '로어북도 같이 분석', '캐릭터·채팅 로어북의 켜진 항목. 변수·상태창 항목은 빼요')}
         ${switchRow('lmc_lore_global', '전역 로어북도 넣기', '전역·페르소나 로어북까지 읽어요')}
-        ${numberRow('lmc_lore_budget', '로어북 최대 글자 수', 2000, 60000, 1000, '넘치면 캐릭터 이름이 나오는 항목부터 넣어요')}`,
+        ${numberRow('lmc_lore_budget', '로어북 최대 글자 수', 2000, 60000, 1000, '넘치면 캐릭터 이름이 나오는 항목부터 넣어요')}
+        </div>`,
         true,
     );
     const toggles = card(
@@ -862,7 +874,7 @@ function settingsHtml() {
                             <div class="lmc-hero-title">레모나 도우미 <span class="lmc-pill">v${VERSION}</span></div>
                             <div class="lmc-hero-sub" id="lmc_mode_line"></div>
                         </div>
-                        <span class="lmc-switch lmc-switch-lg" title="레모나 도우미 전체 켜기·끄기"><input type="checkbox" id="lmc_enabled" aria-label="레모나 도우미 켜기" /><i aria-hidden="true"></i></span>
+                        <button type="button" id="lmc_enabled" class="lmc-switch lmc-switch-lg lmc-switch-btn" role="switch" aria-checked="false" aria-label="레모나 도우미 전체 켜기·끄기" title="레모나 도우미 전체 켜기·끄기"><i aria-hidden="true"></i></button>
                     </div>
                     ${switchRow('lmc_lemona_only', '레모나 프리셋에서만 켜기', '다른 프리셋을 쓰면 알아서 쉬어요')}
 
@@ -896,10 +908,14 @@ function fillProfiles() {
 }
 
 /** Turns the extension on or off (or "Lemona only") and brings every surface in line. */
+function setMasterSwitch(on) {
+    $('#lmc_enabled').attr('aria-checked', String(on)).toggleClass('is-on', on);
+}
+
 export function setPower(patch) {
     Object.assign(getSettings(), patch);
     saveSettings();
-    if ('enabled' in patch) $('#lmc_enabled').prop('checked', !!getSettings().enabled);
+    if ('enabled' in patch) setMasterSwitch(!!getSettings().enabled);
     if ('lemona_only' in patch) $('#lmc_lemona_only').prop('checked', !!getSettings().lemona_only);
     applyActiveState({ announce: true });
 }
@@ -962,20 +978,28 @@ function bindSettings() {
                 after();
             });
 
-    $('#lmc_enabled')
-        .prop('checked', !!s.enabled)
-        .on('change', function () {
-            setPower({ enabled: $(this).prop('checked') });
-        });
+    // A plain button, not a checkbox: nothing in SillyTavern's or a theme's checkbox styling can swallow the tap
+    setMasterSwitch(!!s.enabled);
+    $('#lmc_enabled').on('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPower({ enabled: !getSettings().enabled });
+    });
     $('#lmc_lemona_only')
         .prop('checked', !!s.lemona_only)
         .on('change', function () {
             setPower({ lemona_only: $(this).prop('checked') });
         });
-    // Clicking the big switch must not also open or close the drawer
-    $('#lmc_settings .lmc-hero .lmc-switch').on('click', e => e.stopPropagation());
 
     check('#lmc_insight_enabled', 'insight_enabled');
+    $('#lmc_insight_module')
+        .prop('checked', !!s.insight_module)
+        .on('change', function () {
+            s.insight_module = $(this).prop('checked');
+            saveSettings();
+            toast('info', s.insight_module ? '캐해 기능을 켰어요.' : '캐해 기능을 껐어요. 다음 답변부터 캐해가 들어가지 않아요.', '🍋 레모나');
+            applyActiveState();
+        });
     check('#lmc_insight_think', 'insight_think_line');
     num('#lmc_insight_depth', 'insight_fallback_depth', 0, 20);
     check('#lmc_toggles_auto', 'toggles_auto_apply');
@@ -1073,7 +1097,7 @@ export function updateStatus() {
         .attr('data-state', active ? 'on' : reason === 'off' ? 'off' : 'rest');
     $('#lmc_mode_line').text(active ? (lemona ? '레모나 프리셋에서 일하는 중' : '다른 프리셋에서 일반 모드로 일하는 중') : reason === 'off' ? '꺼져 있어요' : '레모나 프리셋이 아니라 쉬는 중');
     $('#lmc_settings .lmc-panel').attr('data-active', String(active));
-    $('#lmc_enabled').prop('checked', !!s.enabled);
+    setMasterSwitch(!!s.enabled);
     $('#lmc_lemona_only').prop('checked', !!s.lemona_only);
     $('#lmc_sleep').html(active ? '' : sleepHtml(reason)).toggle(!active);
     $('#lmc_body').toggle(active);
@@ -1081,6 +1105,11 @@ export function updateStatus() {
 
     const setStat = (id, text, tone) => $(id).text(text).attr('data-tone', tone);
     setStat('#lmc_st_char', cur ? cur.char.name : '없음', cur ? 'ok' : 'none');
+    $('#lmc_st_char').attr('title', cur ? cur.char.name : '');
+    const moduleOn = !!s.insight_module;
+    $('#lmc_insight_body').toggle(moduleOn);
+    $('#lmc_insight_off').toggle(!moduleOn);
+    $('#lmc_insight_module').prop('checked', moduleOn);
     setStat('#lmc_st_preset', lemona ? '레모나' : '다른 프리셋', lemona ? 'ok' : 'warn');
     const chatVer = cur ? loadChatProfile() : null;
     const profile = cur ? loadProfile() : null;
@@ -1088,10 +1117,11 @@ export function updateStatus() {
     const shown = chatVer ?? profile;
     const kindTag = shown && shown.kind !== 'single' ? ` · ${KIND_SHORT[shown.kind]}` : '';
     const insightText = !cur ? '-' : (chatVer ? '채팅 버전' : profile ? (long && s.insight_soft_long ? '카드 · 옅게' : '카드 버전') : '아직') + kindTag;
-    setStat('#lmc_st_insight', insightText, !cur ? 'none' : chatVer || (profile && !long) ? 'ok' : 'warn');
+    if (moduleOn) setStat('#lmc_st_insight', insightText, !cur ? 'none' : chatVer || (profile && !long) ? 'ok' : 'warn');
+    else setStat('#lmc_st_insight', '안 씀', 'none');
     $('#lmc_long_hint')
         .text(long ? `이 채팅은 AI 답변이 ${storyLength()}개예요. 캐릭터가 카드와 달라졌다면 「채팅 반영 분석」으로 지금 모습을 잡아 주세요.` : '')
-        .toggle(!!long);
+        .toggle(!!long && moduleOn);
     setStat('#lmc_st_mvu', state.mvu ? '감지됨' : '없음', state.mvu ? 'ok' : 'none');
 
     $('#lmc_health').html(healthHtml(healthCheck().filter(h => h.level === 'warn')));
@@ -1130,6 +1160,8 @@ const MENU_FEATURES = ['lmc_menu_analyze', 'lmc_menu_edit', 'lmc_menu_toggles', 
 function updateMenu() {
     const active = isActive();
     for (const id of MENU_FEATURES) $(`#${id}`).toggle(active);
+    const insight = active && !!getSettings().insight_module;
+    $('#lmc_menu_analyze, #lmc_menu_edit').toggle(insight);
     const on = !!getSettings().enabled;
     $('#lmc_menu_power span').text(on ? '레모나 도우미 끄기' : '레모나 도우미 켜기');
 }

@@ -216,7 +216,8 @@
 /* status */
 .lmc-status {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* the drawer is narrow even on desktop: let cells wrap to two per row instead of cutting names */
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 6px;
     margin: 8px 0;
 }
@@ -235,15 +236,18 @@
 }
 .lmc-stat b {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 6px;
-    overflow: hidden;
     font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.4;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
 }
 .lmc-stat b::before {
     content: '';
+    align-self: flex-start;
+    margin-top: 0.45em;
     flex: 0 0 8px;
     width: 8px;
     height: 8px;
@@ -470,14 +474,33 @@
     width: 42px;
     height: 24px;
 }
-.lmc-ui .lmc-switch input[type='checkbox'] {
-    all: unset;
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    margin: 0;
+.lmc-ui .lmc-switch {
     cursor: pointer;
-    opacity: 0;
+    margin: 0;
+}
+/* The real checkbox covers the whole switch. It needs an explicit size: an input with all:unset has no
+   intrinsic box, which left the switch with nothing to click (and SillyTavern styles checkboxes too) */
+.lmc-ui .lmc-switch input[type='checkbox'] {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    cursor: pointer;
+    opacity: 0 !important;
+    pointer-events: auto !important;
+}
+.lmc-ui .lmc-switch input[type='checkbox']::before,
+.lmc-ui .lmc-switch input[type='checkbox']::after {
+    display: none !important;
 }
 .lmc-ui .lmc-switch i {
     position: absolute;
@@ -1482,4 +1505,39 @@ mark.lmc-ban-possessive {
 }
 .lmc-ui .lmc-member-body .lmc-rel-head .lmc-input:nth-child(2) {
     font-weight: 400;
+}
+
+/* ---------------------------------------------------------------- v1.6.1 */
+.lmc-ui .lmc-off-note {
+    margin: 6px 0 2px;
+    padding: 9px 12px;
+    color: #6b6656;
+    background: #f3eeda;
+    border-radius: 12px;
+    font-size: 0.88em;
+    line-height: 1.55;
+}
+/* master switch is a button (role=switch) */
+.lmc-ui .lmc-switch-btn {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+.lmc-ui .lmc-switch-btn i {
+    pointer-events: none;
+}
+.lmc-ui .lmc-switch-btn.is-on i {
+    background: var(--lmc-leaf);
+    box-shadow: inset 0 0 0 2px #5a7530;
+}
+.lmc-ui .lmc-switch-btn.is-on i::after {
+    transform: translateX(24px);
+}
+.lmc-ui .lmc-switch-btn:focus-visible i {
+    outline: 3px solid var(--lmc-lemon);
+    outline-offset: 2px;
 }

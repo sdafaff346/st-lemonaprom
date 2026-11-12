@@ -100,7 +100,7 @@ function hookMvu(Mvu, onReady) {
 
     const onInit = variables => {
         const s = getSettings();
-        if (!s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
+        if (!s.insight_module || !s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
         const profile = loadProfile();
         if (!profile) return;
         variables.stat_data ??= {};
@@ -110,7 +110,7 @@ function hookMvu(Mvu, onReady) {
 
     eventSource.on(ev.VARIABLE_UPDATE_ENDED ?? 'mag_variable_update_ended', (variables, before) => {
         const s = getSettings();
-        if (!s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
+        if (!s.insight_module || !s.insight_enabled || !s.mvu_enabled || !variables || !isActive()) return;
         const profile = loadProfile();
         if (!profile) return;
         const prev = normalizeMvuState(before?.stat_data?.[MVU_KEY], profile, defaultMvuState(profile));
