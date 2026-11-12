@@ -3,7 +3,11 @@
 import { clamp, cleanText, ctx, getSettings, LIMITS, LOG, MVU_KEY, state, toPercent } from './core.js';
 import { activeProfile } from './insight.js';
 
-const loadProfile = () => activeProfile()?.profile ?? null;
+// The 가면균열 / 기울기 variables describe one person; a cast or a world has no single mask to track
+const loadProfile = () => {
+    const p = activeProfile()?.profile ?? null;
+    return p && (p.kind ?? 'single') === 'single' ? p : null;
+};
 import { isActive } from './preset.js';
 
 export function defaultMvuState(profile) {
@@ -36,7 +40,7 @@ function latestStatData() {
 }
 
 export function readMvuState(profile) {
-    if (!profile || !mvuActive()) return null;
+    if (!profile || (profile.kind ?? 'single') !== 'single' || !mvuActive()) return null;
     return normalizeMvuState(latestStatData()?.[MVU_KEY], profile, defaultMvuState(profile));
 }
 

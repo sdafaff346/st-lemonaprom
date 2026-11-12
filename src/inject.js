@@ -2,7 +2,7 @@
 // goes into <thinkingProcess>; with any other preset it falls back to an in-chat extension prompt.
 
 import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, state } from './core.js';
-import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, THINK_LINE } from './insight.js';
+import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, thinkLineFor } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
 import { detectLemona, isActive } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
@@ -96,7 +96,7 @@ export function onPromptReady(eventData) {
     if (thinkAt === -1) return;
     let t = chat[thinkAt].content;
     if (profile && s.insight_think_line) {
-        const line = c.substituteParams(THINK_LINE);
+        const line = c.substituteParams(thinkLineFor(profile));
         t = t.includes('\nNarration is in') ? t.replace('\nNarration is in', `${line}\nNarration is in`) : t.replace('</thinkingProcess>', `${line.trimStart()}\n</thinkingProcess>`);
     }
     // Any MVU card needs its update block, not only ours

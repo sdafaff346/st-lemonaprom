@@ -2,6 +2,7 @@
 
 import { sideGenerate } from './api.js';
 import { cleanText, ctx, currentCharacter, ensureFullCharacter, extractJson, getMeta, getSettings, LIMITS, maskNonStory, readCharData, saveMeta, toPercent, writeCharData } from './core.js';
+import { buildCastPrompt, CAST_THINK_LINE, isCastKind, KIND_LABELS, normalizeCast, normalizeKind, normalizeWorld } from './cast.js';
 import { collectLore } from './lore.js';
 import { presetLanguage } from './preset.js';
 
@@ -86,7 +87,11 @@ export function normalizeProfile(raw) {
         .map(t => cleanText(t, LIMITS.change))
         .filter(Boolean)
         .slice(0, LIMITS.max_changes);
+    const kind = normalizeKind(src.kind);
     return {
+        kind,
+        cast: kind === 'single' ? [] : normalizeCast(src.cast).filter(m => !isUserName(m.name)),
+        world: normalizeWorld(kind === 'sim' || kind === 'rpg' ? src.world : null),
         layers,
         pairs,
         relations,
@@ -100,7 +105,8 @@ export function normalizeProfile(raw) {
 }
 
 export function isProfileEmpty(profile) {
-    return !profile || (LAYER_FIELDS.every(f => !profile.layers[f.key]) && profile.pairs.length === 0 && (profile.relations?.length ?? 0) === 0 && (profile.changes?.length ?? 0) === 0);
+    return !profile || (LAYER_FIELDS.every(f => !profile.layers[f.key]) && profile.pairs.length === 0 && (profile.relations?.length ?? 0) === 0 && (profile.changes?.length ?? 0) === 0
+        && (profile.cast?.length ?? 0) === 0 && !profile.world?.stance && !profile.world?.npc_rule);
 }
 
 export function loadProfile() {
@@ -192,9 +198,41 @@ function languageLine(settings) {
     return LANGUAGE_LINE[settings.output_language] ?? LANGUAGE_LINE.ko;
 }
 
-function analysisSystemPrompt(settings) {
+function kindSection(forcedKind) {
+    const lines = [
+        'Card kinds:',
+        '- "single": the card is one character; {{char}} is that person.',
+        '- "multi" (다인봇): the card plays a fixed group of two or more named characters who share the scenes (siblings, a party, a household, rivals).',
+        '- "sim" (시뮬봇): a simulation or setting card; {{char}} is a narrator or a world, and people come and go as the story needs (school, city, workplace, dating sim with many routes).',
+        '- "rpg" (RPG봇): a game-like card with quests, stats, combat, levels, a system window or a game-master narrator.',
+        forcedKind
+            ? `The user has set this card's kind to "${forcedKind}". Use it.`
+            : 'First decide which kind this card is and put it in "kind".',
+        '',
+        'What to fill for each kind (leave the other fields empty or out):',
+        '- single: layers, pairs, relations, base_crack (items 1-4 below).',
+        `- multi: cast — every main character of the group (up to ${LIMITS.max_cast}). pairs and relations stay empty; put tensions inside each member.`,
+        `- sim / rpg: world, pairs as the world's tensions (2-3 values or sides that pull against each other, e.g. "order" vs "freedom", "guild" vs "crown"; lean = where things stand now; behavior = how it shows in daily life; cost may be empty), and cast = the recurring people named in the card or lorebook (up to ${LIMITS.max_cast}, most important first; empty if it names nobody).`,
+        '',
+        'cast members (multi, sim, rpg):',
+        '   - name: as the card writes it. aliases: other names, titles or nicknames the story uses for them (0-4).',
+        '   - role: who they are in the story, in a few words.',
+        '   - surface: how they come across to others, as behaviour.',
+        '   - inner: what they actually want and what they fear underneath; it should explain or contradict the surface.',
+        '   - voice: what makes their speech or habits recognisably theirs, so they do not sound like the others.',
+        '   - pair: their own two colliding values {"a","b","lean"} (lean 0-100 toward a), or null.',
+        '   Every member must differ from the others in want and voice. Never include {{user}}.',
+        'world (sim, rpg):',
+        '   - stance: how this world treats people and {{user}} — what it rewards, punishes, ignores (e.g. "nobody does anything for free; favours are remembered and called in").',
+        '   - npc_rule: how people the card does not name should be written so they are not props (e.g. "every shopkeeper has their own worry that colours how they deal").',
+        `Length limits for these: name and aliases under ${LIMITS.name}, role under ${LIMITS.role}, surface and inner under ${LIMITS.member}, voice under ${LIMITS.voice}, stance and npc_rule under ${LIMITS.world} characters.`,
+    ];
+    return lines.join('\n');
+}
+
+function analysisSystemPrompt(settings, forcedKind = null) {
     return [
-        "You are a character analyst for interactive fiction. Read the character card (and its lorebook, when one is given) and extract the character's inner logic so another writer can keep them consistent yet multi-faceted in situations the card never mentions.",
+        "You are a character analyst for interactive fiction. Read the character card (and its lorebook, when one is given) and extract the inner logic of the people in it so another writer can keep them consistent yet multi-faceted in situations the card never mentions.",
         '',
         'Principles:',
         '- Do NOT use personality-type labels (MBTI, enneagram, zodiac, "tsundere", etc.) or bare adjectives ("cold", "kind").',
@@ -204,7 +242,9 @@ function analysisSystemPrompt(settings) {
         '- Keep the character at the intensity the card writes. Do not soften edges (rudeness, selfishness, cruelty) or add kindness the card does not give.',
         '- A <lorebook> holds world-info entries tied to this character. Treat it as part of the card: use it for past events, relationships and world rules that explain the motives. The card wins where the two disagree. Do not summarise the lorebook or copy world facts into the output; use it only to ground the inner logic.',
         '',
-        'Produce:',
+        kindSection(forcedKind),
+        '',
+        'Items for "single" (and recommend for every kind):',
         '1. layers — the two-layer reading:',
         '   - surface: how the character presents to others (behaviour, manner).',
         '   - desire: what they actually want underneath.',
@@ -233,7 +273,7 @@ function analysisSystemPrompt(settings) {
         languageLine(settings),
         '',
         'Output ONLY one JSON object, no commentary, no code fence, in exactly this shape:',
-        '{"layers":{"surface":"...","desire":"...","fear":"...","self_deception":"..."},"pairs":[{"a":"...","b":"...","lean":70,"behavior":"...","cost":"..."}],"relations":[{"who":"...","shows":"..."}],"base_crack":20,"recommend":{"bot_type":"original","canon":"","mood":"none","harsh":false,"gentle":false,"romcom":false,"angst":false,"multi_cast":false,"foreign_speaker":false,"reason":"..."}}',
+        '{"kind":"single","layers":{"surface":"...","desire":"...","fear":"...","self_deception":"..."},"pairs":[{"a":"...","b":"...","lean":70,"behavior":"...","cost":"..."}],"relations":[{"who":"...","shows":"..."}],"base_crack":20,"cast":[{"name":"...","aliases":["..."],"role":"...","surface":"...","inner":"...","voice":"...","pair":{"a":"...","b":"...","lean":60}}],"world":{"stance":"...","npc_rule":"..."},"recommend":{"bot_type":"original","canon":"","mood":"none","harsh":false,"gentle":false,"romcom":false,"angst":false,"multi_cast":false,"foreign_speaker":false,"reason":"..."}}',
     ].join('\n');
 }
 
@@ -243,7 +283,7 @@ function clip(value, max) {
 }
 
 /** @param {{ onLore?: (lore: {books:string[], used:number, total:number, skipped:number, cut:number}) => void }} [opts] */
-export async function analyzeCurrentCharacter({ onLore } = {}) {
+export async function analyzeCurrentCharacter({ onLore, kind = null } = {}) {
     const cur = await ensureFullCharacter();
     if (!cur) throw new Error('1:1 채팅에서 캐릭터를 연 상태여야 해요.');
     const { char } = cur;
@@ -263,14 +303,25 @@ export async function analyzeCurrentCharacter({ onLore } = {}) {
     onLore?.(lore);
     const input = `${card}${lore.text ? `\n\n${lore.text}` : ''}\n\nAnalyse this character now. Output the JSON object only.`;
     // The lorebook makes the input longer; give the answer a little more room too
-    const reply = await sideGenerate(analysisSystemPrompt(settings), input, lore.text ? { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, 2500) } : {});
-    const profile = normalizeProfile({ ...extractJson(reply), lore: lore.used ? { books: lore.books, used: lore.used } : null });
+    const forced = kind ? normalizeKind(kind) : null;
+    // A cast or a world needs more room than one person
+    const roomy = lore.text || forced !== 'single';
+    const reply = await sideGenerate(analysisSystemPrompt(settings, forced), input, roomy ? { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, forced && forced !== 'single' ? 3500 : 2500) } : {});
+    const json = extractJson(reply) ?? {};
+    const profile = normalizeProfile({ ...json, kind: forced ?? json.kind, lore: lore.used ? { books: lore.books, used: lore.used } : null });
+    // A fixed group of characters is exactly what Lemona's 「👥 다인봇 시장통 방지」 is for
+    if (profile.kind === 'multi' && profile.recommend) profile.recommend.multi_cast = true;
     if (isProfileEmpty(profile)) throw new Error('분석 결과가 비어 있어요. 다시 시도해 주세요.');
     return profile;
 }
 
 function readingText(p) {
-    const lines = [];
+    const lines = [`kind: ${p.kind ?? 'single'}`];
+    if (p.world?.stance) lines.push(`world stance: ${p.world.stance}`);
+    if (p.world?.npc_rule) lines.push(`world npc_rule: ${p.world.npc_rule}`);
+    for (const m of p.cast ?? []) {
+        lines.push(`member ${m.name}${m.aliases.length ? ` (aka ${m.aliases.join(', ')})` : ''}: role ${m.role} | surface ${m.surface} | inner ${m.inner} | voice ${m.voice}${m.pair ? ` | pair "${m.pair.a}" vs "${m.pair.b}" lean ${m.pair.lean}` : ''}${m.changed ? ` | changed ${m.changed}` : ''}`);
+    }
     for (const { key } of LAYER_FIELDS) if (p.layers[key]) lines.push(`${key}: ${p.layers[key]}`);
     p.pairs.forEach((x, i) => lines.push(`pair ${i + 1}: "${x.a}" vs "${x.b}", lean ${x.lean} toward "${x.a}". behavior: ${x.behavior} cost: ${x.cost}`));
     for (const r of p.relations ?? []) lines.push(`around ${r.who}: ${r.shows}`);
@@ -307,8 +358,9 @@ const UPDATE_RULES = [
     '- base_crack: how much the inner layer shows now.',
     `- changes: 0 to ${LIMITS.max_changes} lines, each how {{char}} now acts differently from the card and what in the story caused it, as behaviour (e.g. "answers {{user}}'s teasing with teasing now instead of silence, since the night at the station"). Under ${LIMITS.change} characters each. Empty array when nothing has changed.`,
     "- Judge {{char}} by what {{char}} did and said. {{user}}'s lines are context only.",
+    '- For multi, sim and rpg: update the cast the same way. Keep every member, bring their fields to where the story has them now, and fill "changed" (one line: how they now differ from the card and why) for members the story has changed. Add people who have become recurring in the story (in several scenes, or who matter to {{user}}), most important first, within the member limit; a member the story removed (left, died) keeps a "changed" line saying so. Update world stance and tensions only where the story shows it.',
     '- recommend is not needed in this mode.',
-    'Output the same JSON object with "changes" added: {"layers":{...},"pairs":[...],"relations":[...],"changes":["..."],"base_crack":20}',
+    'Output the same JSON object with "changes" added: {"kind":"...","layers":{...},"pairs":[...],"relations":[...],"cast":[{"name":"...","aliases":[],"role":"...","surface":"...","inner":"...","voice":"...","pair":null,"changed":"..."}],"world":{...},"changes":["..."],"base_crack":20}',
 ].join('\n');
 
 /** Re-reads the character through the chat so far. The result is this chat's version. */
@@ -339,10 +391,12 @@ export async function analyzeChatEvolution({ onLore } = {}) {
         'Update the reading of {{char}} for where the story is now. Output the JSON object only.',
     ].filter(Boolean);
     const input = c.substituteParams(parts.join('\n\n'));
-    const reply = await sideGenerate(analysisSystemPrompt(settings) + UPDATE_RULES, input, { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, 2500) });
-    const json = extractJson(reply);
+    const kind = normalizeKind(prev?.kind);
+    const reply = await sideGenerate(analysisSystemPrompt(settings, prev ? kind : null) + UPDATE_RULES, input, { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, kind === 'single' ? 2500 : 3500) });
+    const json = extractJson(reply) ?? {};
     const profile = normalizeProfile({
         ...json,
+        kind: prev ? kind : json.kind,
         recommend: prev?.recommend ?? json?.recommend,
         based_on: { messages: story.used, total: story.total },
         lore: lore.used ? { books: lore.books, used: lore.used } : null,
@@ -374,7 +428,8 @@ function leanText(a, b, lean) {
  * @param {{ source?: 'card'|'chat', soft?: boolean }} [opts]
  *   source: where the reading came from. soft: card reading in a long chat, so keep only the deep motives.
  */
-export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false } = {}) {
+export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text } = {}) {
+    if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text });
     const l = profile.layers;
     const head = source === 'chat'
         ? "A reading of {{char}} as they are now in this story, updated from the card by what has happened in the chat. Use it to fill in the realism rules above with this specific person."
@@ -416,6 +471,13 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
     out.push('', 'Use only the parts this moment actually touches; most replies need one or none. These are tendencies, not rules: {{char}} may surprise, contradict themselves, act out of mood, or change when the story gives a reason. Contradiction between the layers is intended: keep it alive instead of resolving it.', '</character_insight>');
     return out.join('\n');
 }
+
+/** Checklist line that fits the profile's kind. */
+export function thinkLineFor(profile) {
+    return isCastKind(profile?.kind) ? CAST_THINK_LINE : THINK_LINE;
+}
+
+export { KIND_LABELS };
 
 /** Extra checklist line for Lemona's <thinkingProcess>. */
 export const THINK_LINE = '\n- Insight: does this moment press on one side of {{char}}\'s two layers, or force one of their value pairs? If so, which way they lean and what it costs, as {{char}} is now in this story (what the chat has established beats the notes); if not, leave it out.';

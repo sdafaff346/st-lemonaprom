@@ -1414,3 +1414,72 @@ mark.lmc-ban-possessive {
     font-size: 0.86em;
     line-height: 1.55;
 }
+
+/* ---------------------------------------------------------------- v1.6.0: card kinds, world, cast */
+.lmc-ui .lmc-kind-row {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    background: #fffdf4;
+    border: 1.5px solid var(--lmc-line);
+    border-radius: 14px;
+}
+.lmc-ui .lmc-kind-label {
+    display: block;
+    margin: 0 0 6px;
+    font-size: 0.86em;
+    font-weight: 700;
+    color: var(--lmc-leaf-2);
+}
+.lmc-ui .lmc-kind-row .lmc-hint {
+    margin: 6px 0 0;
+}
+.lmc-ui .lmc-member {
+    margin: 0 0 10px;
+    background: #fffef7;
+    border: 1.5px solid var(--lmc-line);
+    border-left: 5px solid var(--lmc-lemon);
+    border-radius: 14px;
+}
+.lmc-ui .lmc-member[open] {
+    border-left-color: var(--lmc-leaf);
+}
+.lmc-ui .lmc-member > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    padding: 10px 40px 10px 12px;
+    cursor: pointer;
+    list-style: none;
+    position: relative;
+}
+.lmc-ui .lmc-member > summary::-webkit-details-marker {
+    display: none;
+}
+.lmc-ui .lmc-member > summary::after {
+    content: '▾';
+    position: absolute;
+    right: 14px;
+    top: 9px;
+    color: var(--lmc-leaf-2);
+    transition: transform 0.2s;
+}
+.lmc-ui .lmc-member[open] > summary::after {
+    transform: rotate(180deg);
+}
+.lmc-ui .lmc-member > summary b {
+    color: var(--lmc-ink);
+}
+.lmc-ui .lmc-member > summary small {
+    color: #7c7764;
+    overflow-wrap: anywhere;
+}
+.lmc-ui .lmc-member-body {
+    padding: 0 12px 10px;
+}
+.lmc-ui .lmc-member-body .lmc-rel-head .lmc-input:first-child {
+    flex: 0 1 38%;
+}
+.lmc-ui .lmc-member-body .lmc-rel-head .lmc-input:nth-child(2) {
+    font-weight: 400;
+}

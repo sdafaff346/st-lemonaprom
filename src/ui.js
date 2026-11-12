@@ -7,12 +7,13 @@ import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, und
 import { clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
 import { refreshInjection } from './inject.js';
 import { syncModelToggles } from './autotoggle.js';
+import { emptyMember, KIND_LABELS, KIND_SHORT, KINDS, MEMBER_FIELDS } from './cast.js';
 import { analyzeChatEvolution, analyzeCurrentCharacter, buildInsightPrompt, deleteChatProfile, deleteProfile, emptyPair, emptyRelation, isLongChatOnCard, LAYER_FIELDS, loadChatProfile, loadProfile, normalizeProfile, saveChatProfile, saveProfile, storyLength } from './insight.js';
 import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 
 // ================================================================ small building blocks
 
@@ -101,7 +102,7 @@ function editorHtml(draft, charName, unsaved, mode = 'card') {
     const recChips = recommendSummary(rec);
     const recHtml = rec
         ? `<section class="lmc-sec">
-            <h4><span class="lmc-num">4</span>레모나 토글 추천</h4>
+            <h4><span class="lmc-num" data-auto-num></span>레모나 토글 추천</h4>
             <div class="lmc-chips">${recChips.length ? recChips.map(c => `<span class="lmc-chip lmc-chip-lemon">${esc(c)}</span>`).join('') : '<span class="lmc-chip">추가로 켤 것 없음</span>'}</div>
             ${rec.reason ? `<p class="lmc-hint">${esc(rec.reason)}</p>` : ''}
             <div class="lmc-diff" data-rec-diff></div>
@@ -119,8 +120,24 @@ function editorHtml(draft, charName, unsaved, mode = 'card') {
     let body = `
         ${changes}
         <p class="lmc-note-box">라벨 대신 <b>행동 문장</b>으로 적어 주세요. <span class="lmc-strike">공정함</span> → 남이 새치기하면 참지 않고 지적한다</p>
-        <section class="lmc-sec">
-            <h4><span class="lmc-num">1</span>겉과 속</h4>
+        <div class="lmc-kind-row">
+            <span class="lmc-kind-label">카드 종류</span>
+            <div class="lmc-segs" role="group" aria-label="카드 종류">${KINDS.map(k => `<button type="button" class="lmc-seg${draft.kind === k ? ' is-on' : ''}" aria-pressed="${draft.kind === k}" data-kind="${k}">${esc(KIND_LABELS[k])}</button>`).join('')}</div>
+            <p class="lmc-hint" data-kind-hint></p>
+        </div>
+        <section class="lmc-sec" data-kinds="sim rpg">
+            <h4><span class="lmc-num" data-auto-num></span>세계</h4>
+            <div class="lmc-field">
+                <div class="lmc-field-head"><b>세계가 사람을 대하는 방식</b><small>무엇을 보상하고 벌하고 무시하는지</small><span class="lmc-count" data-count="world:stance"></span></div>
+                <textarea class="lmc-input lmc-textarea" rows="2" maxlength="${LIMITS.world}" data-world="stance" placeholder="예: 공짜는 없다. 받은 호의는 기억되고 언젠가 청구된다.">${esc(draft.world.stance)}</textarea>
+            </div>
+            <div class="lmc-field">
+                <div class="lmc-field-head"><b>이름 없는 사람들</b><small>그때그때 나오는 인물을 쓰는 법</small><span class="lmc-count" data-count="world:npc_rule"></span></div>
+                <textarea class="lmc-input lmc-textarea" rows="2" maxlength="${LIMITS.world}" data-world="npc_rule" placeholder="예: 가게 주인도 저마다 걱정거리가 있고, 그게 흥정하는 태도에 묻어난다.">${esc(draft.world.npc_rule)}</textarea>
+            </div>
+        </section>
+        <section class="lmc-sec" data-kinds="single">
+            <h4><span class="lmc-num" data-auto-num></span>겉과 속</h4>
             <div class="lmc-layer-grid">${layers}</div>
             <div class="lmc-field">
                 <div class="lmc-field-head"><b>평소 속마음 노출</b><small>MVU 가면 균열의 시작값</small><span class="lmc-count" data-count="base_crack"></span></div>
@@ -128,13 +145,20 @@ function editorHtml(draft, charName, unsaved, mode = 'card') {
                 <div class="lmc-scale"><span>철저히 감춤</span><span>다 드러남</span></div>
             </div>
         </section>
-        <section class="lmc-sec">
-            <h4><span class="lmc-num">2</span>부딪히는 가치 쌍 <small data-pair-count></small></h4>
+        <section class="lmc-sec" data-kinds="single sim rpg">
+            <h4><span class="lmc-num" data-auto-num></span><span data-pair-title>부딪히는 가치 쌍</span> <small data-pair-count></small></h4>
+            <p class="lmc-hint" data-kinds="sim rpg">세계 안에서 서로 당기는 가치나 세력이에요. 기우는 쪽은 지금 형세예요.</p>
             <div data-pairs></div>
             <button type="button" class="lmc-btn lmc-btn-ghost" data-add-pair><i class="fa-solid fa-plus"></i> 가치 쌍 추가</button>
         </section>
-        <section class="lmc-sec">
-            <h4><span class="lmc-num">3</span>사람에 따라 <small data-rel-count></small></h4>
+        <section class="lmc-sec" data-kinds="multi sim rpg">
+            <h4><span class="lmc-num" data-auto-num></span><span data-cast-title>등장인물</span> <small data-cast-count></small></h4>
+            <p class="lmc-hint">이름이나 다른 이름이 최근 메시지에 나온 사람만 자세히 넣어요. 3명 이하면 늘 다 넣어요.</p>
+            <div data-cast></div>
+            <button type="button" class="lmc-btn lmc-btn-ghost" data-add-member><i class="fa-solid fa-user-plus"></i> 인물 추가</button>
+        </section>
+        <section class="lmc-sec" data-kinds="single">
+            <h4><span class="lmc-num" data-auto-num></span>사람에 따라 <small data-rel-count></small></h4>
             <p class="lmc-hint">이 사람 앞에서만 겉이나 속이 다르게 드러나는 방식이에요. 그 사람이 장면에 있을 때만 써요.</p>
             <div data-relations></div>
             <button type="button" class="lmc-btn lmc-btn-ghost" data-add-rel><i class="fa-solid fa-plus"></i> 사람 추가</button>
@@ -186,6 +210,43 @@ function pairHtml(p, i) {
     </div>`;
 }
 
+function memberHtml(m, i, mode) {
+    const fields = MEMBER_FIELDS.map(
+        f => `
+            <div class="lmc-field">
+                <div class="lmc-field-head"><b>${esc(f.label)}</b><small>${esc(f.help)}</small><span class="lmc-count" data-count="m:${f.key}"></span></div>
+                <textarea class="lmc-input lmc-textarea" rows="${f.key === 'role' ? 1 : 2}" maxlength="${f.max()}" data-mf="${f.key}">${esc(m[f.key])}</textarea>
+            </div>`,
+    ).join('');
+    const pair = m.pair ?? { a: '', b: '', lean: 50 };
+    return `
+    <details class="lmc-member" data-member="${i}"${m.name ? '' : ' open'}>
+        <summary><b data-member-name>${esc(m.name || '새 인물')}</b><small data-member-role>${esc(m.role)}</small>${m.changed ? '<span class="lmc-pill lmc-pill-auto">달라짐</span>' : ''}</summary>
+        <div class="lmc-member-body">
+            <div class="lmc-rel-head">
+                <input class="lmc-input" maxlength="${LIMITS.name}" placeholder="이름" data-mf="name" value="${esc(m.name)}" />
+                <input class="lmc-input" placeholder="다른 이름 (쉼표로)" data-mf="aliases" value="${esc(m.aliases.join(', '))}" />
+                <button type="button" class="lmc-icon-btn" title="이 인물 삭제" aria-label="이 인물 삭제" data-del-member><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+            ${fields}
+            <div class="lmc-field">
+                <div class="lmc-field-head"><b>이 사람의 가치 쌍</b><small>비워 두면 안 넣어요</small><span class="lmc-count lmc-count-strong" data-mlean-label></span></div>
+                <div class="lmc-pair-head">
+                    <input class="lmc-input lmc-pair-a" maxlength="${LIMITS.side}" placeholder="A" data-mp="a" value="${esc(pair.a)}" />
+                    <span class="lmc-vs">vs</span>
+                    <input class="lmc-input lmc-pair-b" maxlength="${LIMITS.side}" placeholder="B" data-mp="b" value="${esc(pair.b)}" />
+                </div>
+                <input type="range" class="lmc-range lmc-range-lean" min="0" max="100" step="5" data-mp="lean" value="${pair.lean}" />
+            </div>
+            ${mode === 'chat' || m.changed ? `
+            <div class="lmc-field">
+                <div class="lmc-field-head"><b>이 채팅에서 달라진 점</b><span class="lmc-count" data-count="m:changed"></span></div>
+                <textarea class="lmc-input lmc-textarea" rows="2" maxlength="${LIMITS.member}" data-mf="changed">${esc(m.changed)}</textarea>
+            </div>` : ''}
+        </div>
+    </details>`;
+}
+
 function relationHtml(r, i) {
     return `
     <div class="lmc-rel" data-rel="${i}">
@@ -210,6 +271,30 @@ function changeHtml(text, i) {
 
 function bindEditor(root, draft, mode = 'card') {
     const q = sel => root.querySelector(sel);
+    const KIND_HINT = {
+        single: '한 사람인 카드예요. 겉과 속, 가치 쌍, 사람에 따라를 써요.',
+        multi: '여러 인물이 같이 나오는 카드예요. 인물마다 원하는 것과 말투를 다르게 잡아요.',
+        sim: '세계와 그 안의 사람들을 다루는 카드예요. 세계의 규칙, 긴장, 자주 나오는 인물을 써요.',
+        rpg: '게임처럼 굴러가는 카드예요. 세계의 규칙, 세력 간 긴장, 주요 NPC를 써요.',
+    };
+    const applyKind = () => {
+        root.querySelectorAll('[data-kinds]').forEach(el => {
+            el.style.display = el.dataset.kinds.split(' ').includes(draft.kind) ? '' : 'none';
+        });
+        root.querySelectorAll('[data-kind]').forEach(b => {
+            const on = b.dataset.kind === draft.kind;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', String(on));
+        });
+        q('[data-kind-hint]').textContent = KIND_HINT[draft.kind];
+        q('[data-pair-title]').textContent = draft.kind === 'single' ? '부딪히는 가치 쌍' : '세계의 긴장';
+        q('[data-cast-title]').textContent = draft.kind === 'multi' ? '등장인물' : '주요 인물 (NPC)';
+        let n = 0;
+        root.querySelectorAll('section.lmc-sec').forEach(sec => {
+            const num = sec.querySelector('[data-auto-num]');
+            if (num && sec.style.display !== 'none') num.textContent = String(++n);
+        });
+    };
     const updatePreview = () => {
         const pre = q('[data-preview]');
         if (!pre) return;
@@ -241,6 +326,23 @@ function bindEditor(root, draft, mode = 'card') {
                 el.querySelector('[data-count="change"]').textContent = `${(draft.changes[Number(el.dataset.change)] ?? '').length}/${LIMITS.change}`;
             });
         }
+        q('[data-cast-count]').textContent = `${draft.cast.length}/${LIMITS.max_cast}`;
+        q('[data-add-member]').style.display = draft.cast.length >= LIMITS.max_cast ? 'none' : '';
+        root.querySelectorAll('[data-member]').forEach(el => {
+            const m = draft.cast[Number(el.dataset.member)];
+            if (!m) return;
+            el.querySelectorAll('[data-count^="m:"]').forEach(c => {
+                const key = c.dataset.count.slice(2);
+                const f = MEMBER_FIELDS.find(x => x.key === key);
+                c.textContent = `${(m[key] ?? '').length}/${f ? f.max() : LIMITS.member}`;
+            });
+            const p = m.pair;
+            el.querySelector('[data-mlean-label]').textContent = p?.a && p?.b ? (p.lean >= 60 ? `${p.a} 쪽 ${p.lean}` : p.lean <= 40 ? `${p.b} 쪽 ${100 - p.lean}` : '팽팽') : '';
+        });
+        for (const key of ['stance', 'npc_rule']) {
+            const c = q(`[data-count="world:${key}"]`);
+            if (c) c.textContent = `${draft.world[key].length}/${LIMITS.world}`;
+        }
         q('[data-rel-count]').textContent = `${draft.relations.length}/${LIMITS.max_relations}`;
         q('[data-add-rel]').style.display = draft.relations.length >= LIMITS.max_relations ? 'none' : '';
         root.querySelectorAll('[data-rel]').forEach(el => {
@@ -268,6 +370,11 @@ function bindEditor(root, draft, mode = 'card') {
         updateCounts();
         updatePreview();
     };
+    const renderCast = () => {
+        q('[data-cast]').innerHTML = draft.cast.length ? draft.cast.map((m, i) => memberHtml(m, i, mode)).join('') : '<p class="lmc-empty">아직 인물이 없어요.</p>';
+        updateCounts();
+        updatePreview();
+    };
     const renderChanges = () => {
         const box = q('[data-changes]');
         if (!box) return;
@@ -279,6 +386,19 @@ function bindEditor(root, draft, mode = 'card') {
         const t = e.target;
         if (t.dataset.layer) draft.layers[t.dataset.layer] = t.value;
         else if ('cf' in t.dataset) draft.changes[Number(t.closest('[data-change]').dataset.change)] = t.value;
+        else if (t.dataset.world) draft.world[t.dataset.world] = t.value;
+        else if (t.dataset.mf || t.dataset.mp) {
+            const el = t.closest('[data-member]');
+            const m = draft.cast[Number(el.dataset.member)];
+            if (t.dataset.mf === 'aliases') m.aliases = t.value.split(/[,，、/]/).map(x => x.trim()).filter(Boolean);
+            else if (t.dataset.mf) m[t.dataset.mf] = t.value;
+            else {
+                m.pair ??= { a: '', b: '', lean: 50 };
+                m.pair[t.dataset.mp] = t.dataset.mp === 'lean' ? Number(t.value) : t.value;
+            }
+            if (t.dataset.mf === 'name') el.querySelector('[data-member-name]').textContent = t.value || '새 인물';
+            if (t.dataset.mf === 'role') el.querySelector('[data-member-role]').textContent = t.value;
+        }
         else if (t.dataset.rf) draft.relations[Number(t.closest('[data-rel]').dataset.rel)][t.dataset.rf] = t.value;
         else if (t.hasAttribute('data-base-crack')) draft.base_crack = Number(t.value);
         else if (t.dataset.pf) {
@@ -295,6 +415,16 @@ function bindEditor(root, draft, mode = 'card') {
         } else if (e.target.closest('[data-del-pair]')) {
             draft.pairs.splice(Number(e.target.closest('[data-pair]').dataset.pair), 1);
             renderPairs();
+        } else if (e.target.closest('[data-kind]')) {
+            draft.kind = e.target.closest('[data-kind]').dataset.kind;
+            applyKind();
+            updatePreview();
+        } else if (e.target.closest('[data-add-member]')) {
+            if (draft.cast.length < LIMITS.max_cast) draft.cast.push(emptyMember());
+            renderCast();
+        } else if (e.target.closest('[data-del-member]')) {
+            draft.cast.splice(Number(e.target.closest('[data-member]').dataset.member), 1);
+            renderCast();
         } else if (e.target.closest('[data-add-change]')) {
             if (draft.changes.length < LIMITS.max_changes) draft.changes.push('');
             renderChanges();
@@ -317,6 +447,8 @@ function bindEditor(root, draft, mode = 'card') {
     renderPairs();
     renderRelations();
     renderChanges();
+    renderCast();
+    applyKind();
     updateRecDiff();
 }
 
@@ -327,7 +459,8 @@ function requireActive() {
     return false;
 }
 
-export async function runAnalysis() {
+/** @param {{ kind?: string }} [opts] kind: analyse as this card kind instead of letting the model decide */
+export async function runAnalysis({ kind = null } = {}) {
     if (!requireActive()) return;
     const cur = requireCharacter();
     if (!cur) return;
@@ -335,6 +468,7 @@ export async function runAnalysis() {
         let pending = toast('info', `${cur.char.name} 카드를 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
             return await analyzeCurrentCharacter({
+                kind,
                 onLore: lore => {
                     if (!lore.used) return;
                     toastr.clear(pending);
@@ -346,7 +480,8 @@ export async function runAnalysis() {
         }
     });
     if (result) {
-        toast('success', result.lore?.used ? `분석 완료 (로어북 ${result.lore.used}개 항목 포함). 내용을 확인하고 저장해 주세요.` : '분석 완료. 내용을 확인하고 저장해 주세요.');
+        const what = `${KIND_LABELS[result.kind]}${result.cast.length ? ` · 인물 ${result.cast.length}명` : ''}${result.lore?.used ? ` · 로어북 ${result.lore.used}개 항목` : ''}`;
+        toast('success', `분석 완료 (${what}). 내용을 확인하고 저장해 주세요.`);
         await openEditor(result, true);
     }
 }
@@ -391,6 +526,9 @@ export async function openEditor(initial = null, unsaved = false, mode = null) {
         pairs: base.pairs.map(p => ({ ...p })),
         relations: (base.relations ?? []).map(r => ({ ...r })),
         changes: [...(base.changes ?? [])],
+        kind: base.kind ?? 'single',
+        cast: (base.cast ?? []).map(m => ({ ...m, aliases: [...m.aliases], pair: m.pair ? { ...m.pair } : null })),
+        world: { stance: base.world?.stance ?? '', npc_rule: base.world?.npc_rule ?? '' },
         based_on: base.based_on,
         base_crack: base.base_crack,
         recommend: base.recommend,
@@ -450,7 +588,7 @@ export async function openEditor(initial = null, unsaved = false, mode = null) {
             toast('info', '카드 버전을 삭제했어요.');
         }
     } else if (result === RE_ANALYZE) {
-        await (mode === 'chat' ? runChatAnalysis() : runAnalysis());
+        await (mode === 'chat' ? runChatAnalysis() : runAnalysis({ kind: draft.kind }));
     } else if (result === SWITCH) {
         await openEditor(null, false, mode === 'chat' ? 'card' : 'chat');
     }
@@ -634,7 +772,7 @@ function settingsHtml() {
     const insight = card(
         '🧠',
         '캐릭터 해석',
-        '겉과 속 · 부딪히는 가치',
+        '겉과 속 · 가치 · 다인 · 시뮬 · RPG',
         `<div class="lmc-btn-row">
             <button type="button" id="lmc_analyze" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-wand-magic-sparkles"></i> <span>카드 분석</span></button>
             <button type="button" id="lmc_analyze_chat" class="lmc-btn lmc-btn-leaf"><i class="fa-solid fa-comments"></i> <span>채팅 반영 분석</span></button>
@@ -644,6 +782,9 @@ function settingsHtml() {
         ${switchRow('lmc_insight_enabled', '답변 생성 때 넣기', '레모나에선 「👤 현실적·캐해」 바로 뒤')}
         ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '「🔍 추론」 체크리스트 끝에 한 줄')}
         ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}
+        <div class="lmc-subhead"><i class="fa-solid fa-users"></i> 다인봇 · 시뮬봇 · RPG봇</div>
+        ${switchRow('lmc_cast_scene', '장면에 나온 인물만 자세히', '이름이 최근 메시지에 나온 인물만 넣고 나머지는 이름만')}
+        ${numberRow('lmc_cast_scan', '장면 판단에 보는 메시지 수', 1, 20, 1, '최근 메시지부터')}
         <div class="lmc-subhead"><i class="fa-solid fa-comments"></i> 긴 채팅</div>
         ${switchRow('lmc_soft_long', '긴 채팅에선 카드 버전 옅게', '채팅 버전이 없을 때 깊은 동기만 넣고 말투·행동은 채팅을 따라요')}
         ${numberRow('lmc_long_chat', '긴 채팅 기준 (AI 답변 수)', 5, 500, 5, '이만큼 넘으면 옅게 넣어요')}
@@ -840,6 +981,8 @@ function bindSettings() {
     check('#lmc_toggles_auto', 'toggles_auto_apply');
     check('#lmc_lore_enabled', 'lore_enabled');
     check('#lmc_soft_long', 'insight_soft_long');
+    check('#lmc_cast_scene', 'cast_scene_only');
+    num('#lmc_cast_scan', 'cast_scan_messages', 1, 20);
     num('#lmc_long_chat', 'insight_long_chat', 5, 500);
     num('#lmc_chat_budget', 'chat_budget', 4000, 80000);
     check('#lmc_lore_global', 'lore_include_global');
@@ -942,7 +1085,9 @@ export function updateStatus() {
     const chatVer = cur ? loadChatProfile() : null;
     const profile = cur ? loadProfile() : null;
     const long = !chatVer && profile && isLongChatOnCard({ source: 'card' }, s);
-    const insightText = !cur ? '-' : chatVer ? '채팅 버전' : profile ? (long && s.insight_soft_long ? '카드 · 옅게' : '카드 버전') : '아직';
+    const shown = chatVer ?? profile;
+    const kindTag = shown && shown.kind !== 'single' ? ` · ${KIND_SHORT[shown.kind]}` : '';
+    const insightText = !cur ? '-' : (chatVer ? '채팅 버전' : profile ? (long && s.insight_soft_long ? '카드 · 옅게' : '카드 버전') : '아직') + kindTag;
     setStat('#lmc_st_insight', insightText, !cur ? 'none' : chatVer || (profile && !long) ? 'ok' : 'warn');
     $('#lmc_long_hint')
         .text(long ? `이 채팅은 AI 답변이 ${storyLength()}개예요. 캐릭터가 카드와 달라졌다면 「채팅 반영 분석」으로 지금 모습을 잡아 주세요.` : '')
