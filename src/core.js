@@ -7,7 +7,7 @@ export const META_KEY = 'lemona_companion'; // chat metadata key
 export const MVU_KEY = '캐해';
 export const LOG = '[레모나]';
 
-export const LIMITS = Object.freeze({ layer: 160, side: 24, pair_text: 160, max_pairs: 3, recent: 120, who: 24, relation: 160, max_relations: 3 });
+export const LIMITS = Object.freeze({ layer: 160, side: 24, pair_text: 160, max_pairs: 3, recent: 120, who: 24, relation: 160, max_relations: 3, change: 160, max_changes: 3 });
 
 // extension_prompt_types / extension_prompt_roles from script.js (not exported via getContext)
 export const PROMPT_TYPE = Object.freeze({ NONE: -1, IN_PROMPT: 0, IN_CHAT: 1 });
@@ -27,6 +27,11 @@ export const defaultSettings = Object.freeze({
     insight_enabled: true,
     insight_fallback_depth: 4,
     insight_think_line: true,
+
+    // long chats
+    insight_soft_long: true, // card version in a long chat: deep motives only
+    insight_long_chat: 40, // AI replies that count as a long chat
+    chat_budget: 24000, // characters of chat history read by the chat analysis
 
     // lorebook in the analysis
     lore_enabled: true,

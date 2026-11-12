@@ -563,8 +563,10 @@
     color: #b3ad97;
 }
 .lmc-ui .lmc-input-num {
-    flex: 0 0 76px;
-    width: 76px;
+    flex: 0 0 86px;
+    width: 86px;
+    padding-left: 4px;
+    padding-right: 4px;
     text-align: center;
 }
 .lmc-ui .lmc-textarea {
@@ -1350,4 +1352,65 @@ mark.lmc-ban-possessive {
     font-size: 0.78em;
     vertical-align: 1px;
     white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- v1.5.0: card / chat versions */
+.lmc-ui .lmc-ver-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    background: #fff8d6;
+    color: var(--lmc-ink);
+    border: 1.5px solid var(--lmc-line);
+    border-radius: 12px;
+    font-size: 0.9em;
+}
+.lmc-ui .lmc-ver-line b {
+    padding: 1px 10px;
+    color: #3a382e;
+    background: var(--lmc-lemon);
+    border-radius: 999px;
+    font-size: 0.92em;
+}
+.lmc-ui .lmc-ver-line small {
+    flex-basis: 100%;
+    color: var(--lmc-ink-2, #6b6656);
+}
+.lmc-ui .lmc-ver-chat {
+    background: var(--lmc-leaf-3);
+    border-color: #c9d8a8;
+}
+.lmc-ui .lmc-ver-chat b {
+    color: #fff;
+    background: var(--lmc-leaf);
+}
+.lmc-ui .lmc-num-leaf {
+    color: #fff;
+    background: var(--lmc-leaf);
+}
+.lmc-ui .lmc-sec-changes {
+    border-color: #c9d8a8;
+    background: #fbfdf5;
+}
+.lmc-ui .lmc-change {
+    margin: 0 0 8px;
+}
+.lmc-ui .lmc-change-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 2px;
+}
+.lmc-ui .lmc-long-hint {
+    margin: 8px 0 2px;
+    padding: 8px 12px;
+    color: #6b5410;
+    background: #fff2a8;
+    border-radius: 12px;
+    font-size: 0.86em;
+    line-height: 1.55;
 }

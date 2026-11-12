@@ -7,12 +7,12 @@ import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, und
 import { clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
 import { refreshInjection } from './inject.js';
 import { syncModelToggles } from './autotoggle.js';
-import { analyzeCurrentCharacter, buildInsightPrompt, deleteProfile, emptyPair, emptyRelation, LAYER_FIELDS, loadProfile, normalizeProfile, saveProfile } from './insight.js';
+import { analyzeChatEvolution, analyzeCurrentCharacter, buildInsightPrompt, deleteChatProfile, deleteProfile, emptyPair, emptyRelation, isLongChatOnCard, LAYER_FIELDS, loadChatProfile, loadProfile, normalizeProfile, saveChatProfile, saveProfile, storyLength } from './insight.js';
 import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 // ================================================================ small building blocks
 
@@ -89,7 +89,7 @@ function recommendSummary(rec) {
     return parts;
 }
 
-function editorHtml(draft, charName, unsaved) {
+function editorHtml(draft, charName, unsaved, mode = 'card') {
     const layers = LAYER_FIELDS.map(
         f => `
         <div class="lmc-field">
@@ -108,7 +108,16 @@ function editorHtml(draft, charName, unsaved) {
             <button type="button" class="lmc-btn lmc-btn-leaf" data-apply-rec><i class="fa-solid fa-wand-magic-sparkles"></i> 추천대로 토글 바꾸기</button>
         </section>`
         : '';
+    const changes = mode === 'chat'
+        ? `<section class="lmc-sec lmc-sec-changes">
+            <h4><span class="lmc-num lmc-num-leaf">✦</span>이 채팅에서 달라진 점 <small data-change-count></small></h4>
+            <p class="lmc-hint">카드와 달라진 지금 모습과 그렇게 된 계기예요. 이건 지키고, 예전 모습은 밑에 깔린 채로 둬요.</p>
+            <div data-changes></div>
+            <button type="button" class="lmc-btn lmc-btn-ghost" data-add-change><i class="fa-solid fa-plus"></i> 달라진 점 추가</button>
+        </section>`
+        : '';
     let body = `
+        ${changes}
         <p class="lmc-note-box">라벨 대신 <b>행동 문장</b>으로 적어 주세요. <span class="lmc-strike">공정함</span> → 남이 새치기하면 참지 않고 지적한다</p>
         <section class="lmc-sec">
             <h4><span class="lmc-num">1</span>겉과 속</h4>
@@ -139,7 +148,15 @@ function editorHtml(draft, charName, unsaved) {
     const loreLine = lore?.used
         ? `<p class="lmc-lore-line"><i class="fa-solid fa-book-atlas"></i> 로어북 ${lore.used}개 항목도 같이 읽었어요${lore.books.length ? `<small>${lore.books.map(esc).join(' · ')}</small>` : ''}</p>`
         : '';
-    body = loreLine + body;
+    let banner = '';
+    if (mode === 'chat') {
+        const b = draft.based_on;
+        banner = `<p class="lmc-ver-line lmc-ver-chat"><b>이 채팅 버전</b> 이 채팅에서만 쓰고, 카드 버전보다 우선해요.${b ? `<small>최근 메시지 ${b.messages}개(전체 ${b.total}개)를 읽고 만들었어요.</small>` : ''}</p>`;
+    } else {
+        const long = isLongChatOnCard({ source: 'card' });
+        banner = `<p class="lmc-ver-line"><b>카드 버전</b> 이 캐릭터의 모든 채팅에서 출발점으로 써요.${long ? `<small>이 채팅은 AI 답변이 ${storyLength()}개라 카드 버전은 깊은 동기만 넣고 있어요. 지금 모습을 잡으려면 「채팅 반영 분석」을 써 보세요.</small>` : ''}</p>`;
+    }
+    body = banner + loreLine + body;
     const sub = `${esc(charName)}${unsaved ? ' <span class="lmc-pill lmc-pill-new">새 분석 · 저장 전</span>' : ''}`;
     return popupFrame('캐릭터 해석', sub, body, 'lmc-editor');
 }
@@ -183,13 +200,22 @@ function relationHtml(r, i) {
     </div>`;
 }
 
-function bindEditor(root, draft) {
+function changeHtml(text, i) {
+    return `
+    <div class="lmc-change" data-change="${i}">
+        <textarea class="lmc-input lmc-textarea" rows="2" maxlength="${LIMITS.change}" placeholder="예: 놀리면 이제 침묵 대신 맞받아친다. 역에서 그 밤을 보낸 뒤로." data-cf>${esc(text)}</textarea>
+        <div class="lmc-change-foot"><span class="lmc-count" data-count="change"></span><button type="button" class="lmc-icon-btn" title="삭제" aria-label="삭제" data-del-change><i class="fa-solid fa-trash-can"></i></button></div>
+    </div>`;
+}
+
+function bindEditor(root, draft, mode = 'card') {
     const q = sel => root.querySelector(sel);
     const updatePreview = () => {
         const pre = q('[data-preview]');
         if (!pre) return;
         const p = normalizeProfile(draft);
-        pre.textContent = ctx().substituteParams(buildInsightPrompt(p, readMvuState(p)));
+        const soft = mode === 'card' && !!getSettings().insight_soft_long && isLongChatOnCard({ source: 'card' });
+        pre.textContent = ctx().substituteParams(buildInsightPrompt(p, readMvuState(p), { source: mode, soft }));
     };
     const updateRecDiff = () => {
         const el = q('[data-rec-diff]');
@@ -208,6 +234,13 @@ function bindEditor(root, draft) {
         q('[data-count="base_crack"]').textContent = String(draft.base_crack);
         q('[data-pair-count]').textContent = `${draft.pairs.length}/${LIMITS.max_pairs}`;
         q('[data-add-pair]').style.display = draft.pairs.length >= LIMITS.max_pairs ? 'none' : '';
+        if (q('[data-changes]')) {
+            q('[data-change-count]').textContent = `${draft.changes.length}/${LIMITS.max_changes}`;
+            q('[data-add-change]').style.display = draft.changes.length >= LIMITS.max_changes ? 'none' : '';
+            root.querySelectorAll('[data-change]').forEach(el => {
+                el.querySelector('[data-count="change"]').textContent = `${(draft.changes[Number(el.dataset.change)] ?? '').length}/${LIMITS.change}`;
+            });
+        }
         q('[data-rel-count]').textContent = `${draft.relations.length}/${LIMITS.max_relations}`;
         q('[data-add-rel]').style.display = draft.relations.length >= LIMITS.max_relations ? 'none' : '';
         root.querySelectorAll('[data-rel]').forEach(el => {
@@ -235,9 +268,17 @@ function bindEditor(root, draft) {
         updateCounts();
         updatePreview();
     };
+    const renderChanges = () => {
+        const box = q('[data-changes]');
+        if (!box) return;
+        box.innerHTML = draft.changes.length ? draft.changes.map(changeHtml).join('') : '<p class="lmc-empty">아직 달라진 점이 없어요.</p>';
+        updateCounts();
+        updatePreview();
+    };
     root.addEventListener('input', e => {
         const t = e.target;
         if (t.dataset.layer) draft.layers[t.dataset.layer] = t.value;
+        else if ('cf' in t.dataset) draft.changes[Number(t.closest('[data-change]').dataset.change)] = t.value;
         else if (t.dataset.rf) draft.relations[Number(t.closest('[data-rel]').dataset.rel)][t.dataset.rf] = t.value;
         else if (t.hasAttribute('data-base-crack')) draft.base_crack = Number(t.value);
         else if (t.dataset.pf) {
@@ -254,6 +295,12 @@ function bindEditor(root, draft) {
         } else if (e.target.closest('[data-del-pair]')) {
             draft.pairs.splice(Number(e.target.closest('[data-pair]').dataset.pair), 1);
             renderPairs();
+        } else if (e.target.closest('[data-add-change]')) {
+            if (draft.changes.length < LIMITS.max_changes) draft.changes.push('');
+            renderChanges();
+        } else if (e.target.closest('[data-del-change]')) {
+            draft.changes.splice(Number(e.target.closest('[data-change]').dataset.change), 1);
+            renderChanges();
         } else if (e.target.closest('[data-add-rel]')) {
             if (draft.relations.length < LIMITS.max_relations) draft.relations.push(emptyRelation());
             renderRelations();
@@ -269,6 +316,7 @@ function bindEditor(root, draft) {
     q('details.lmc-preview').addEventListener('toggle', updatePreview);
     renderPairs();
     renderRelations();
+    renderChanges();
     updateRecDiff();
 }
 
@@ -303,25 +351,55 @@ export async function runAnalysis() {
     }
 }
 
-export async function openEditor(initial = null, unsaved = false) {
+/** Re-reads the character through this chat and opens the result as this chat's version. */
+export async function runChatAnalysis() {
+    if (!requireActive()) return;
+    const cur = requireCharacter();
+    if (!cur) return;
+    const result = await guarded('analyze', async () => {
+        const pending = toast('info', `${cur.char.name}의 지금 모습을 채팅에서 읽는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
+        try {
+            return await analyzeChatEvolution();
+        } finally {
+            toastr.clear(pending);
+        }
+    });
+    if (result) {
+        toast('success', result.changes.length ? `달라진 점 ${result.changes.length}개를 찾았어요. 확인하고 저장해 주세요.` : '카드와 크게 달라진 점은 없었어요. 확인하고 저장해 주세요.');
+        await openEditor(result, true, 'chat');
+    }
+}
+
+/**
+ * @param {any} [initial] profile to show instead of the saved one
+ * @param {boolean} [unsaved]
+ * @param {'card'|'chat'|null} [mode] which version; by default this chat's if it has one
+ */
+export async function openEditor(initial = null, unsaved = false, mode = null) {
     if (!requireActive()) return;
     const cur = await ensureFullCharacter();
     if (!cur) return requireCharacter();
     const { Popup, POPUP_TYPE, POPUP_RESULT } = ctx();
     const RE_ANALYZE = POPUP_RESULT.CUSTOM1;
     const DELETE = POPUP_RESULT.CUSTOM2;
-    const base = initial ?? loadProfile() ?? normalizeProfile({});
+    const SWITCH = POPUP_RESULT.CUSTOM3;
+    const chatSaved = loadChatProfile();
+    mode ??= chatSaved ? 'chat' : 'card';
+    const base = initial ?? (mode === 'chat' ? chatSaved : loadProfile()) ?? normalizeProfile({});
     const draft = {
         layers: { ...base.layers },
         pairs: base.pairs.map(p => ({ ...p })),
         relations: (base.relations ?? []).map(r => ({ ...r })),
+        changes: [...(base.changes ?? [])],
+        based_on: base.based_on,
         base_crack: base.base_crack,
         recommend: base.recommend,
         lore: base.lore,
     };
     let dirty = unsaved;
+    const other = mode === 'chat' ? { text: '카드 버전 보기', icon: 'fa-id-card' } : chatSaved ? { text: '이 채팅 버전 보기', icon: 'fa-comments' } : null;
 
-    const popup = new Popup(editorHtml(draft, cur.char.name, unsaved), POPUP_TYPE.TEXT, '', {
+    const popup = new Popup(editorHtml(draft, cur.char.name, unsaved, mode), POPUP_TYPE.TEXT, '', {
         wide: true,
         large: true,
         allowVerticalScrolling: true,
@@ -329,11 +407,12 @@ export async function openEditor(initial = null, unsaved = false) {
         okButton: '저장',
         cancelButton: '닫기',
         customButtons: [
-            { text: '다시 분석', icon: 'fa-wand-magic-sparkles', result: RE_ANALYZE },
-            { text: '삭제', icon: 'fa-trash-can', result: DELETE },
+            { text: mode === 'chat' ? '채팅 다시 읽기' : '다시 분석', icon: 'fa-wand-magic-sparkles', result: RE_ANALYZE },
+            ...(other ? [{ ...other, result: SWITCH }] : []),
+            { text: mode === 'chat' ? '이 채팅 버전 삭제' : '삭제', icon: 'fa-trash-can', result: DELETE },
         ],
         onOpen: p => {
-            bindEditor(p.content, draft);
+            bindEditor(p.content, draft, mode);
             p.content.addEventListener('input', () => (dirty = true));
         },
         onClosing: async p => {
@@ -342,7 +421,10 @@ export async function openEditor(initial = null, unsaved = false) {
                 if (draft.relations.some(x => (x.who || x.shows) && !(x.who && x.shows))) toast('warning', '이름과 내용을 둘 다 적지 않은 사람은 저장되지 않아요.');
                 return true;
             }
-            if (p.result === DELETE) return (await Popup.show.confirm('캐릭터 해석 삭제', `${esc(cur.char.name)}의 캐릭터 해석을 삭제할까요?`)) === POPUP_RESULT.AFFIRMATIVE;
+            if (p.result === DELETE) {
+                const msg = mode === 'chat' ? '이 채팅 버전을 지우고 카드 버전으로 돌아갈까요?' : `${esc(cur.char.name)}의 카드 버전 캐해를 삭제할까요? (채팅 버전은 그대로 남아요)`;
+                return (await Popup.show.confirm('캐릭터 해석 삭제', msg)) === POPUP_RESULT.AFFIRMATIVE;
+            }
             if (dirty && p.result !== RE_ANALYZE) return (await Popup.show.confirm('저장하지 않고 닫기', '저장하지 않은 내용이 있어요. 닫을까요?')) === POPUP_RESULT.AFFIRMATIVE;
             return true;
         },
@@ -351,14 +433,26 @@ export async function openEditor(initial = null, unsaved = false) {
     const result = await popup.show();
     if (result === POPUP_RESULT.AFFIRMATIVE) {
         await guarded('save', async () => {
-            await saveProfile(draft);
-            toast('success', '저장했어요. 다음 답변부터 적용돼요.');
+            if (mode === 'chat') {
+                saveChatProfile(draft);
+                toast('success', '이 채팅 버전으로 저장했어요. 다음 답변부터 이 채팅에만 적용돼요.');
+            } else {
+                await saveProfile(draft);
+                toast('success', chatSaved ? '카드 버전을 저장했어요. 이 채팅은 채팅 버전을 계속 써요.' : '저장했어요. 다음 답변부터 적용돼요.');
+            }
         });
     } else if (result === DELETE) {
-        await deleteProfile();
-        toast('info', '삭제했어요.');
+        if (mode === 'chat') {
+            deleteChatProfile();
+            toast('info', '이 채팅 버전을 지웠어요. 이제 카드 버전을 써요.');
+        } else {
+            await deleteProfile();
+            toast('info', '카드 버전을 삭제했어요.');
+        }
     } else if (result === RE_ANALYZE) {
-        await runAnalysis();
+        await (mode === 'chat' ? runChatAnalysis() : runAnalysis());
+    } else if (result === SWITCH) {
+        await openEditor(null, false, mode === 'chat' ? 'card' : 'chat');
     }
     refreshInjection();
     updateStatus();
@@ -543,11 +637,17 @@ function settingsHtml() {
         '겉과 속 · 부딪히는 가치',
         `<div class="lmc-btn-row">
             <button type="button" id="lmc_analyze" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-wand-magic-sparkles"></i> <span>카드 분석</span></button>
+            <button type="button" id="lmc_analyze_chat" class="lmc-btn lmc-btn-leaf"><i class="fa-solid fa-comments"></i> <span>채팅 반영 분석</span></button>
             <button type="button" id="lmc_edit" class="lmc-btn lmc-btn-ghost"><i class="fa-solid fa-pen-to-square"></i> 편집 열기</button>
         </div>
+        <p id="lmc_long_hint" class="lmc-long-hint" style="display:none"></p>
         ${switchRow('lmc_insight_enabled', '답변 생성 때 넣기', '레모나에선 「👤 현실적·캐해」 바로 뒤')}
         ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '「🔍 추론」 체크리스트 끝에 한 줄')}
         ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}
+        <div class="lmc-subhead"><i class="fa-solid fa-comments"></i> 긴 채팅</div>
+        ${switchRow('lmc_soft_long', '긴 채팅에선 카드 버전 옅게', '채팅 버전이 없을 때 깊은 동기만 넣고 말투·행동은 채팅을 따라요')}
+        ${numberRow('lmc_long_chat', '긴 채팅 기준 (AI 답변 수)', 5, 500, 5, '이만큼 넘으면 옅게 넣어요')}
+        ${numberRow('lmc_chat_budget', '채팅 반영 분석이 읽는 글자 수', 4000, 80000, 2000, '최근 메시지부터')}
         <div class="lmc-subhead"><i class="fa-solid fa-book-atlas"></i> 로어북</div>
         ${switchRow('lmc_lore_enabled', '로어북도 같이 분석', '캐릭터·채팅 로어북의 켜진 항목. 변수·상태창 항목은 빼요')}
         ${switchRow('lmc_lore_global', '전역 로어북도 넣기', '전역·페르소나 로어북까지 읽어요')}
@@ -739,6 +839,9 @@ function bindSettings() {
     num('#lmc_insight_depth', 'insight_fallback_depth', 0, 20);
     check('#lmc_toggles_auto', 'toggles_auto_apply');
     check('#lmc_lore_enabled', 'lore_enabled');
+    check('#lmc_soft_long', 'insight_soft_long');
+    num('#lmc_long_chat', 'insight_long_chat', 5, 500);
+    num('#lmc_chat_budget', 'chat_budget', 4000, 80000);
     check('#lmc_lore_global', 'lore_include_global');
     num('#lmc_lore_budget', 'lore_budget', 2000, 60000);
     for (const [id, key] of [['#lmc_model_auto', 'model_auto_toggle'], ['#lmc_model_other_off', 'model_other_off']]) {
@@ -776,6 +879,7 @@ function bindSettings() {
         else if (act === 'everywhere') setPower({ lemona_only: false });
     });
     $('#lmc_analyze').on('click', () => runAnalysis());
+    $('#lmc_analyze_chat').on('click', () => runChatAnalysis());
     $('#lmc_edit').on('click', () => openEditor());
     $('#lmc_toggles').on('click', () => openToggles());
     $('#lmc_bans_last').on('click', () => {
@@ -835,8 +939,14 @@ export function updateStatus() {
     const setStat = (id, text, tone) => $(id).text(text).attr('data-tone', tone);
     setStat('#lmc_st_char', cur ? cur.char.name : '없음', cur ? 'ok' : 'none');
     setStat('#lmc_st_preset', lemona ? '레모나' : '다른 프리셋', lemona ? 'ok' : 'warn');
+    const chatVer = cur ? loadChatProfile() : null;
     const profile = cur ? loadProfile() : null;
-    setStat('#lmc_st_insight', !cur ? '-' : profile ? '저장됨' : '아직', !cur ? 'none' : profile ? 'ok' : 'warn');
+    const long = !chatVer && profile && isLongChatOnCard({ source: 'card' }, s);
+    const insightText = !cur ? '-' : chatVer ? '채팅 버전' : profile ? (long && s.insight_soft_long ? '카드 · 옅게' : '카드 버전') : '아직';
+    setStat('#lmc_st_insight', insightText, !cur ? 'none' : chatVer || (profile && !long) ? 'ok' : 'warn');
+    $('#lmc_long_hint')
+        .text(long ? `이 채팅은 AI 답변이 ${storyLength()}개예요. 캐릭터가 카드와 달라졌다면 「채팅 반영 분석」으로 지금 모습을 잡아 주세요.` : '')
+        .toggle(!!long);
     setStat('#lmc_st_mvu', state.mvu ? '감지됨' : '없음', state.mvu ? 'ok' : 'none');
 
     $('#lmc_health').html(healthHtml(healthCheck().filter(h => h.level === 'warn')));
@@ -846,6 +956,7 @@ export function updateStatus() {
         $b.find('span').text(state.busy.has(key) ? busy : idle);
     };
     busyBtn('#lmc_analyze', 'analyze', '카드 분석', '분석 중…');
+    busyBtn('#lmc_analyze_chat', 'analyze', '채팅 반영 분석', '분석 중…');
     busyBtn('#lmc_habits_ai', 'habits', 'AI로 버릇 찾기', '찾는 중…');
 
     const repeats = s.repeat_enabled && cur ? detectRepeats() : [];

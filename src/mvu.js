@@ -1,7 +1,9 @@
 // MVU dynamic layer: stat_data.캐해 { 가면균열, 기울기[], 최근갈등 }.
 
 import { clamp, cleanText, ctx, getSettings, LIMITS, LOG, MVU_KEY, state, toPercent } from './core.js';
-import { loadProfile } from './insight.js';
+import { activeProfile } from './insight.js';
+
+const loadProfile = () => activeProfile()?.profile ?? null;
 import { isActive } from './preset.js';
 
 export function defaultMvuState(profile) {

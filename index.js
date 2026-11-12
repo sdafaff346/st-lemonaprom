@@ -14,12 +14,12 @@
 import { afterCharacterToggles, flushSettle, registerAutoToggle, scheduleSettle } from './src/autotoggle.js';
 import { decorateMessage, decorateRecent, fixableIssues, fixMessage, scanMessage, stillGenerating } from './src/bans.js';
 import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, state, toast } from './src/core.js';
-import { onPromptReady, refreshInjection } from './src/inject.js';
-import { buildInsightPrompt, loadProfile } from './src/insight.js';
+import { insightForPrompt, onPromptReady, refreshInjection } from './src/inject.js';
+import { buildInsightPrompt } from './src/insight.js';
 import { readMvuState, watchForMvu } from './src/mvu.js';
 import { applyCharacterToggles, detectLemona, healthCheck, inactiveReason, isActive } from './src/preset.js';
 import { analyzeHabits } from './src/repeat.js';
-import { addMenuButtons, applyActiveState, lastReplyId, mountSettings, openBanReport, openEditor, openToggles, runAnalysis, setPower, syncActiveState, updateStatus } from './src/ui.js';
+import { addMenuButtons, applyActiveState, lastReplyId, mountSettings, openBanReport, openEditor, openToggles, runAnalysis, runChatAnalysis, setPower, syncActiveState, updateStatus } from './src/ui.js';
 
 function decorate(mesId) {
     decorateMessage(Number(mesId), openBanReport);
@@ -40,7 +40,7 @@ async function maybeAutoFix(mesId) {
 function registerCommand() {
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx();
     if (!SlashCommandParser?.addCommandObject) return;
-    const actions = ['analyze', 'edit', 'toggles', 'check', 'fix', 'habits', 'show', 'health', 'on', 'off'];
+    const actions = ['analyze', 'reread', 'edit', 'toggles', 'check', 'fix', 'habits', 'show', 'health', 'on', 'off'];
     SlashCommandParser.addCommandObject(
         SlashCommand.fromProps({
             name: 'lemona',
@@ -79,9 +79,12 @@ function registerCommand() {
                         await analyzeHabits();
                         refreshInjection();
                         break;
+                    case 'reread':
+                        await runChatAnalysis();
+                        break;
                     case 'show': {
-                        const p = currentCharacter() ? loadProfile() : null;
-                        return p ? ctx().substituteParams(buildInsightPrompt(p, readMvuState(p))) : '';
+                        const ins = currentCharacter() ? insightForPrompt() : null;
+                        return ins ? ctx().substituteParams(buildInsightPrompt(ins.profile, readMvuState(ins.profile), ins.opts)) : '';
                     }
                     case 'health':
                         if (reason) return reason === 'off' ? '레모나 도우미가 꺼져 있어요.' : '레모나 프리셋이 아니라서 쉬고 있어요.';

@@ -2,7 +2,7 @@
 // goes into <thinkingProcess>; with any other preset it falls back to an in-chat extension prompt.
 
 import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, state } from './core.js';
-import { buildInsightPrompt, loadProfile, THINK_LINE } from './insight.js';
+import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, THINK_LINE } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
 import { detectLemona, isActive } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
@@ -20,9 +20,17 @@ function lemonaChatCompletion() {
     return detectLemona() && ctx().mainApi === 'openai';
 }
 
+/** Profile for the prompt plus how to phrase it: chat version, card version, or card version softened for a long chat. */
+export function insightForPrompt() {
+    const s = getSettings();
+    if (!s.insight_enabled || !currentCharacter()) return null;
+    const active = pickProfile();
+    if (!active) return null;
+    return { profile: active.profile, opts: { source: active.source, soft: !!s.insight_soft_long && isLongChatOnCard(active, s) } };
+}
+
 export function activeProfile() {
-    if (!getSettings().insight_enabled || !currentCharacter()) return null;
-    return loadProfile();
+    return insightForPrompt()?.profile ?? null;
 }
 
 export function clearInjection() {
@@ -40,11 +48,12 @@ export function refreshInjection() {
     const s = getSettings();
     const c = ctx();
     const sub = t => c.substituteParams(t);
-    const profile = activeProfile();
+    const ins = insightForPrompt();
+    const profile = ins?.profile ?? null;
     const mvuState = readMvuState(profile);
 
     if (profile && !lemonaChatCompletion()) {
-        c.setExtensionPrompt(KEYS.insight, sub(buildInsightPrompt(profile, mvuState)), PROMPT_TYPE.IN_CHAT, Number(s.insight_fallback_depth) || 0, false, PROMPT_ROLE.system);
+        c.setExtensionPrompt(KEYS.insight, sub(buildInsightPrompt(profile, mvuState, ins.opts)), PROMPT_TYPE.IN_CHAT, Number(s.insight_fallback_depth) || 0, false, PROMPT_ROLE.system);
     }
     if (profile && mvuState && s.mvu_inject_rules) {
         c.setExtensionPrompt(KEYS.rules, sub(buildMvuRulesPrompt(profile, s)), PROMPT_TYPE.IN_CHAT, 0, false, PROMPT_ROLE.system);
@@ -66,10 +75,11 @@ export function onPromptReady(eventData) {
     const s = getSettings();
     const isText = m => typeof m?.content === 'string';
     const thinkIdx = chat.findIndex(m => isText(m) && m.content.includes('<thinkingProcess>'));
-    const profile = activeProfile();
+    const ins = insightForPrompt();
+    const profile = ins?.profile ?? null;
 
     if (profile) {
-        const block = { role: 'system', content: c.substituteParams(buildInsightPrompt(profile, readMvuState(profile))) };
+        const block = { role: 'system', content: c.substituteParams(buildInsightPrompt(profile, readMvuState(profile), ins.opts)) };
         let placed = false;
         for (const anchor of ANCHORS) {
             const idx = chat.findIndex(m => isText(m) && m.content.includes(anchor));
