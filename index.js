@@ -163,10 +163,15 @@ function init() {
         // Switching presets can wake the extension up or put it to sleep
         eventSource.on(ev, () => applyActiveState({ announce: true }));
     }
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, async mesId => {
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, mesId => {
         decorate(mesId);
         updateStatus();
-        await maybeAutoFix(mesId);
+        // Not awaited: whoever emitted this (SillyTavern, or a background-reply extension putting a
+        // finished reply in place) is waiting to save the chat, and a rewrite takes seconds.
+        // fixMessage re-checks the chat and the message before it writes anything.
+        setTimeout(() => {
+            maybeAutoFix(mesId).catch(e => console.warn(LOG, 'auto fix failed', e));
+        }, 800);
     });
     for (const ev of [event_types.MESSAGE_UPDATED, event_types.MESSAGE_EDITED, event_types.MESSAGE_SWIPED].filter(Boolean)) {
         eventSource.on(ev, mesId => setTimeout(() => decorate(mesId), 50));

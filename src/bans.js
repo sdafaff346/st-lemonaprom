@@ -1,7 +1,7 @@
 // Ban-list checker: parses Lemona's 「🚫 금지단어」 entry, scans replies, highlights hits and fixes them via the side API.
 
 import { sideGenerate } from './api.js';
-import { ctx, esc, extractJson, getSettings, guarded, LOG, maskNonStory, toast } from './core.js';
+import { ctx, esc, extractJson, getSettings, guarded, isInFlight, LOG, maskNonStory, toast } from './core.js';
 import { DEFAULT_BAN_TEXT } from './bans-default.js';
 import { isActive, presetPromptContent } from './preset.js';
 
@@ -278,10 +278,7 @@ export function scanMessage(mesId) {
  * job, say). Rewriting it then would fight whoever is filling it in.
  */
 export function stillGenerating(message) {
-    const extra = message?.extra;
-    if (!extra || typeof extra !== 'object') return false;
-    // ST-Background-Reply tags an in-flight reply with extra.bg_reply and clears it when done
-    return Object.hasOwn(extra, 'bg_reply') && !!extra.bg_reply;
+    return isInFlight(message);
 }
 
 export function displayOwnedByOther(mesId) {
@@ -430,6 +427,7 @@ export async function fixMessage(mesId) {
         // The side call takes seconds, and the user may switch chats meanwhile (background-reply
         // extensions make that normal). Writing then would render and save into the wrong chat.
         const chatAtStart = c.getCurrentChatId?.();
+        const mesAtStart = m.mes;
         const pending = toast('info', `문장 ${targets.length}개 고치는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
             const story = maskNonStory(m.mes).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
@@ -451,7 +449,7 @@ export async function fixMessage(mesId) {
                 toast('warning', '고치는 동안 다른 채팅으로 옮겨서 적용하지 않았어요. 그 채팅으로 돌아가서 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
                 return 0;
             }
-            if (c.chat?.[mesId] !== m) {
+            if (c.chat?.[mesId] !== m || m.mes !== mesAtStart || stillGenerating(m)) {
                 toast('warning', '고치는 동안 메시지가 바뀌어서 적용하지 않았어요. 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
                 return 0;
             }

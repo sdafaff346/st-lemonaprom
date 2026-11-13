@@ -272,7 +272,7 @@ export function neighbourNotices() {
     if (document.getElementById('bgr-dock')) {
         out.push({
             level: 'info',
-            text: '「백그라운드 답장」이 있어요. 백그라운드로 받은 답변에도 캐해가 그대로 들어가고 금지어 검사도 돌아요. 다만 "새 답변 자동 고치기"는 생성이 끝난 답변에만, 그 채팅을 보고 있을 때만 적용돼요.',
+            text: '「백그라운드 답장」이 있어요. 백그라운드로 받은 답변에도 캐해가 그대로 들어가고 금지어 검사도 돌아요. "새 답변 자동 고치기"는 생성이 끝난 답변에만, 그 채팅을 보고 있을 때만 적용돼요. 답변 생성 중에 채팅을 옮기면 그때 돌던 분석·고치기 요청은 같이 멈추니 다시 눌러 주세요.',
         });
     }
     // A translator or similar owns what the reader sees on some recent message
@@ -304,13 +304,17 @@ export function modelToggleIds() {
     return new Set([argon?.id, carbon?.id].filter(Boolean));
 }
 
-/** 'argon' | 'carbon' | 'other' for a model id, '' when there is no model to read. */
+const OTHER_MODEL_RE = /claude|gpt|chatgpt|\bo[134]\b|o[134]-|glm|deepseek|grok|mistral|llama|qwen|kimi|moonshot|command-r|nova|gemma|gemini-(?:1|2|3)[.\-]|gemini.*flash|flash|haiku|sonnet|opus|fable/i;
+
+/** 'argon' | 'carbon' | 'other' for a model id, '' when it is missing or cannot be placed. */
 export function modelFamily(model) {
     const m = String(model ?? '');
     if (!m) return '';
     if (/carbon/i.test(m)) return 'carbon';
     if (/argon/i.test(m)) return 'argon';
-    return 'other';
+    // "Other" only for names that are clearly another model. Since v7.4.1 the preset ships with 🔶 on,
+    // so an alias or proxy name we cannot place must not switch it off.
+    return OTHER_MODEL_RE.test(m) ? 'other' : '';
 }
 
 /** Changes that make 🔷 / 🔶 match `model`. Empty when nothing should move. */

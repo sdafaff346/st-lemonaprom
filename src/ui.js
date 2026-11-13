@@ -4,7 +4,7 @@
 
 import { listProfiles } from './api.js';
 import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, undoFix } from './bans.js';
-import { clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
+import { chatIdentity, clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
 import { refreshInjection } from './inject.js';
 import { syncModelToggles } from './autotoggle.js';
 import { emptyMember, KIND_LABELS, KIND_SHORT, KINDS, MEMBER_FIELDS } from './cast.js';
@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.6.1';
+const VERSION = '1.7.0';
 
 // ================================================================ small building blocks
 
@@ -452,6 +452,13 @@ function bindEditor(root, draft, mode = 'card') {
     updateRecDiff();
 }
 
+/** True (with a notice) when the open chat or character is no longer the one a result belongs to. */
+function movedAway(where, message = '그사이 다른 채팅으로 옮겨서 분석 결과를 버렸어요. 그 채팅으로 돌아가서 다시 해 주세요.') {
+    if (chatIdentity() === where) return false;
+    toast('warning', message, '레모나', { timeOut: 9000 });
+    return true;
+}
+
 function requireInsight() {
     if (getSettings().insight_module) return true;
     toast('info', '캐해 기능이 꺼져 있어요. 서랍 🧠 캐릭터 해석에서 「캐해 기능 쓰기」를 켜 주세요.');
@@ -471,6 +478,7 @@ export async function runAnalysis({ kind = null } = {}) {
     const cur = requireCharacter();
     if (!cur) return;
     if (!requireInsight()) return;
+    const where = chatIdentity();
     const result = await guarded('analyze', async () => {
         let pending = toast('info', `${cur.char.name} 카드를 분석하는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
@@ -486,6 +494,7 @@ export async function runAnalysis({ kind = null } = {}) {
             toastr.clear(pending);
         }
     });
+    if (result && movedAway(where)) return;
     if (result) {
         const what = `${KIND_LABELS[result.kind]}${result.cast.length ? ` · 인물 ${result.cast.length}명` : ''}${result.lore?.used ? ` · 로어북 ${result.lore.used}개 항목` : ''}`;
         toast('success', `분석 완료 (${what}). 내용을 확인하고 저장해 주세요.`);
@@ -499,6 +508,7 @@ export async function runChatAnalysis() {
     const cur = requireCharacter();
     if (!cur) return;
     if (!requireInsight()) return;
+    const where = chatIdentity();
     const result = await guarded('analyze', async () => {
         const pending = toast('info', `${cur.char.name}의 지금 모습을 채팅에서 읽는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
@@ -507,6 +517,7 @@ export async function runChatAnalysis() {
             toastr.clear(pending);
         }
     });
+    if (result && movedAway(where)) return;
     if (result) {
         toast('success', result.changes.length ? `달라진 점 ${result.changes.length}개를 찾았어요. 확인하고 저장해 주세요.` : '카드와 크게 달라진 점은 없었어요. 확인하고 저장해 주세요.');
         await openEditor(result, true, 'chat');
@@ -527,6 +538,8 @@ export async function openEditor(initial = null, unsaved = false, mode = null) {
     const DELETE = POPUP_RESULT.CUSTOM2;
     const SWITCH = POPUP_RESULT.CUSTOM3;
     const chatSaved = loadChatProfile();
+    // The popup can stay open while the chat underneath changes (a background-reply notification, say)
+    const where = chatIdentity();
     mode ??= chatSaved ? 'chat' : 'card';
     const base = initial ?? (mode === 'chat' ? chatSaved : loadProfile()) ?? normalizeProfile({});
     const draft = {
@@ -577,6 +590,7 @@ export async function openEditor(initial = null, unsaved = false, mode = null) {
     });
 
     const result = await popup.show();
+    if ([POPUP_RESULT.AFFIRMATIVE, DELETE, RE_ANALYZE, SWITCH].includes(result) && movedAway(where, '편집 창을 연 뒤에 채팅이 바뀌어서 아무것도 저장하지 않았어요. 그 채팅으로 돌아가서 다시 해 주세요.')) return;
     if (result === POPUP_RESULT.AFFIRMATIVE) {
         await guarded('save', async () => {
             if (mode === 'chat') {
@@ -814,7 +828,7 @@ function settingsHtml() {
         `<div class="lmc-btn-row"><button type="button" id="lmc_toggles" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-sliders"></i> 토글 열기</button></div>
         ${switchRow('lmc_toggles_auto', '캐릭터별 세트 자동 적용', '채팅 열 때, 프리셋을 다시 불러올 때')}
         ${switchRow('lmc_model_auto', '모델 따라 🔷/🔶 자동 전환', 'Argon이면 🔷, Carbon이면 🔶만 켜요')}
-        ${switchRow('lmc_model_other_off', '다른 모델이면 둘 다 끄기', '3.8 Flash 같은 모델일 때')}`,
+        ${switchRow('lmc_model_other_off', '다른 모델이면 둘 다 끄기', 'Claude, 3.8 Flash처럼 다른 모델이 분명할 때만')}`,
     );
     const bans = card(
         '🚫',

@@ -70,7 +70,7 @@ export const state = {
     busy: new Set(),
     mvu: null,
     lemona: false, // active preset looks like Lemona
-    sideCall: false, // our own side generation in flight
+    sidePrompts: new Set(), // system prompts of our own side generations in flight
     lastGenType: null,
 };
 
@@ -118,6 +118,41 @@ export function toast(type, msg, title = '레모나', opts = {}) {
 }
 
 /** Runs fn once at a time per key; shows errors as toasts. */
+/**
+ * True while another extension is still producing this message. ST-Background-Reply tags an in-flight
+ * reply with extra.bg_reply (on the message and on its swipe_info entry) and shows "..." until text arrives.
+ */
+export function isInFlight(message) {
+    if (!message || typeof message !== 'object') return false;
+    if (message.extra?.bg_reply) return true;
+    const info = Array.isArray(message.swipe_info) ? message.swipe_info[message.swipe_id ?? 0] : null;
+    return !!info?.extra?.bg_reply;
+}
+
+/** A finished story message: not a system line, not empty, not a placeholder someone is still filling. */
+export function isStoryMessage(message) {
+    return !!message && !message.is_system && !!message.mes && message.mes !== '...' && !isInFlight(message);
+}
+
+/**
+ * Which chat and character are open. Long side calls compare this before and after: with a
+ * background-reply extension the user (or its notification dock) can switch chats mid-call, and a
+ * result written then would land on the wrong character or chat.
+ */
+export function chatIdentity() {
+    const c = ctx();
+    const cur = currentCharacter();
+    return `${c.getCurrentChatId?.() ?? ''}\u0000${cur?.char?.avatar ?? cur?.char?.name ?? ''}`;
+}
+
+/** Marks an error as "the request was cancelled", which is routine rather than a failure. */
+export class CancelledError extends Error {
+    constructor(message = '요청이 중단됐어요. 정지 버튼을 눌렀거나, 답변 생성 중에 채팅을 옮기면 같이 멈춰요. 다시 눌러 주세요.') {
+        super(message);
+        this.name = 'CancelledError';
+    }
+}
+
 export async function guarded(key, fn) {
     if (state.busy.has(key)) return undefined;
     state.busy.add(key);
@@ -125,6 +160,11 @@ export async function guarded(key, fn) {
     try {
         return await fn();
     } catch (e) {
+        if (e?.name === 'CancelledError') {
+            console.info(LOG, key, 'cancelled');
+            if (!e.silent) toast('info', e.message, '레모나', { timeOut: 7000 });
+            return undefined;
+        }
         console.error(LOG, key, e);
         toast('error', String(e?.message ?? e) + (e?.cause ? ` (${e.cause?.message ?? e.cause})` : ''), '레모나 오류', { timeOut: 10000 });
         return undefined;
@@ -227,7 +267,7 @@ export function recentReplies(limit) {
     const out = [];
     for (let i = (chat?.length ?? 0) - 1; i >= 0 && out.length < limit; i--) {
         const m = chat[i];
-        if (!m || m.is_user || m.is_system || !m.mes) continue;
+        if (!m || m.is_user || !isStoryMessage(m)) continue;
         out.unshift({ id: i, text: m.mes });
     }
     return out;

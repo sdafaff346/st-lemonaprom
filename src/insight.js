@@ -1,7 +1,7 @@
 // Modules 1 & 2: two-layer reading and colliding value pairs. Model-facing text is English.
 
 import { sideGenerate } from './api.js';
-import { cleanText, ctx, currentCharacter, ensureFullCharacter, extractJson, getMeta, getSettings, LIMITS, maskNonStory, readCharData, saveMeta, toPercent, writeCharData } from './core.js';
+import { cleanText, ctx, currentCharacter, ensureFullCharacter, extractJson, getMeta, getSettings, isStoryMessage, LIMITS, maskNonStory, readCharData, saveMeta, toPercent, writeCharData } from './core.js';
 import { buildCastPrompt, CAST_THINK_LINE, isCastKind, KIND_LABELS, normalizeCast, normalizeKind, normalizeWorld } from './cast.js';
 import { collectLore } from './lore.js';
 import { presetLanguage } from './preset.js';
@@ -160,7 +160,7 @@ export function deleteChatProfile() {
 
 /** AI replies in the open chat, the measure of how far a chat has run. */
 export function storyLength() {
-    return (ctx().chat ?? []).filter(m => m && !m.is_user && !m.is_system && m.mes).length;
+    return (ctx().chat ?? []).filter(m => m && !m.is_user && isStoryMessage(m)).length;
 }
 
 /**
@@ -333,7 +333,7 @@ function readingText(p) {
 /** Most recent story messages, newest kept, within `budget` characters. */
 function storyExcerpt(budget) {
     const c = ctx();
-    const msgs = (c.chat ?? []).filter(m => m && !m.is_system && m.mes);
+    const msgs = (c.chat ?? []).filter(isStoryMessage);
     const picked = [];
     let size = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {

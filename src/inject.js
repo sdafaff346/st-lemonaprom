@@ -68,9 +68,11 @@ export function refreshInjection() {
 
 /** CHAT_COMPLETION_PROMPT_READY: splice into the assembled Lemona prompt. */
 export function onPromptReady(eventData) {
-    if (state.sideCall || state.lastGenType === 'quiet' || !isActive()) return;
+    if (state.lastGenType === 'quiet' || !isActive()) return;
     const chat = eventData?.chat;
     if (!Array.isArray(chat) || !lemonaChatCompletion()) return;
+    // One of our own side requests (analysis, fix, habits)
+    if (state.sidePrompts.size && chat.some(m => typeof m?.content === 'string' && state.sidePrompts.has(m.content))) return;
     const c = ctx();
     const s = getSettings();
     const isText = m => typeof m?.content === 'string';

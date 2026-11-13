@@ -2,7 +2,7 @@
 // in the same spirit as Lemona's 「🧹 반복 끊기」 entry but built from this chat.
 
 import { sideGenerate } from './api.js';
-import { cleanText, ctx, extractJson, getMeta, getSettings, guarded, maskNonStory, recentReplies, saveMeta, toast } from './core.js';
+import { chatIdentity, cleanText, ctx, extractJson, getMeta, getSettings, guarded, maskNonStory, recentReplies, saveMeta, toast } from './core.js';
 
 const PARTICLES = ['으로', '에게', '한테', '까지', '부터', '처럼', '은', '는', '이', '가', '을', '를', '도', '만', '의', '에', '과', '와', '로'];
 const STOP = new Set(
@@ -139,8 +139,14 @@ export async function analyzeHabits() {
         }
         const body = replies.map((r, i) => `<reply n="${i + 1}">\n${maskNonStory(r.text).trim().slice(0, 3000)}\n</reply>`).join('\n\n');
         const pending = toast('info', '최근 답변의 버릇을 찾는 중…', '레모나', { timeOut: 0, extendedTimeOut: 0 });
+        const where = chatIdentity();
         try {
             const reply = await sideGenerate(HABIT_SYSTEM, `${body}\n\nOutput the JSON object only.`);
+            // Habits are stored per chat: after a switch they would describe the wrong one
+            if (chatIdentity() !== where) {
+                toast('warning', '그사이 다른 채팅으로 옮겨서 결과를 버렸어요. 그 채팅으로 돌아가서 다시 눌러 주세요.', '레모나', { timeOut: 9000 });
+                return [];
+            }
             const parsed = extractJson(reply);
             const habits = (Array.isArray(parsed?.habits) ? parsed.habits : [])
                 .map(h => ({ habit: cleanText(h?.habit, 200), example: cleanText(h?.example, 80) }))

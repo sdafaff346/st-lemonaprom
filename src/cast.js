@@ -2,7 +2,7 @@
 // RPG봇 (a game-like world). Their reading is a cast of characters (plus, for sim/RPG, the world itself),
 // and only the people in the current scene go into the prompt.
 
-import { cleanText, ctx, getSettings, LIMITS, maskNonStory, toPercent } from './core.js';
+import { cleanText, ctx, getSettings, isStoryMessage, LIMITS, maskNonStory, toPercent } from './core.js';
 
 export const KINDS = Object.freeze(['single', 'multi', 'sim', 'rpg']);
 export const KIND_LABELS = Object.freeze({ single: '단일 캐릭터', multi: '다인봇', sim: '시뮬봇', rpg: 'RPG봇' });
@@ -77,7 +77,7 @@ export function recentSceneText(n = getSettings().cast_scan_messages) {
     const picked = [];
     for (let i = chat.length - 1; i >= 0 && picked.length < Math.max(1, Number(n) || 4); i--) {
         const m = chat[i];
-        if (!m || m.is_system || !m.mes) continue;
+        if (!isStoryMessage(m)) continue;
         picked.push(maskNonStory(m.mes));
     }
     return picked.join('\n');

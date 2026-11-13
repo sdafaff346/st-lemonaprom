@@ -1,6 +1,6 @@
 // Side API calls: a Connection Manager profile if one is chosen, otherwise the main API.
 
-import { ctx, getSettings, LOG, state } from './core.js';
+import { CancelledError, ctx, getSettings, LOG, state } from './core.js';
 
 /** [{ id, name }] of usable connection profiles, or [] when Connection Manager is off. */
 export function listProfiles() {
@@ -45,6 +45,11 @@ function vertexOverrides(profile) {
     return out;
 }
 
+function isCancel(err) {
+    const text = `${err?.name ?? ''} ${err?.message ?? err ?? ''} ${err?.cause?.message ?? ''}`;
+    return /AbortError|Cancelled by|aborted|abort/i.test(text);
+}
+
 async function viaProfile(c, s, system, user, maxTokens) {
     const svc = c.ConnectionManagerRequestService;
     const messages = [
@@ -73,7 +78,9 @@ export async function sideGenerate(system, user, opts = {}) {
     const s = getSettings();
     const maxTokens = Number(opts.maxTokens ?? s.api_max_tokens) || 2000;
     const c = ctx();
-    state.sideCall = true;
+    // Our own prompt passes through CHAT_COMPLETION_PROMPT_READY too; it is recognised by its exact
+    // system text, so a real reply generated at the same time still gets its insight.
+    state.sidePrompts.add(system);
     try {
         if (s.api_profile && c.ConnectionManagerRequestService) {
             try {
@@ -87,10 +94,18 @@ export async function sideGenerate(system, user, opts = {}) {
                     '레모나 도우미', { timeOut: 8000 });
             }
         }
-        const text = await c.generateRaw({ systemPrompt: system, prompt: user, responseLength: maxTokens });
+        let text;
+        try {
+            text = await c.generateRaw({ systemPrompt: system, prompt: user, responseLength: maxTokens });
+        } catch (err) {
+            // SillyTavern cancels raw generations on any "stop" (the Stop button, or a background-reply
+            // extension letting go of a reply so the user can switch chats)
+            if (isCancel(err)) throw new CancelledError();
+            throw err;
+        }
         console.debug(LOG, 'side reply (main API)', text);
         return stripThinking(text);
     } finally {
-        state.sideCall = false;
+        state.sidePrompts.delete(system);
     }
 }
