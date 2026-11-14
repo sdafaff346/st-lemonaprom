@@ -4,7 +4,7 @@
 
 import { listProfiles } from './api.js';
 import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, undoFix } from './bans.js';
-import { chatIdentity, clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, saveSettings, state, toast } from './core.js';
+import { chatIdentity, clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, safeSub, saveSettings, state, toast } from './core.js';
 import { refreshInjection } from './inject.js';
 import { syncModelToggles } from './autotoggle.js';
 import { emptyMember, KIND_LABELS, KIND_SHORT, KINDS, MEMBER_FIELDS } from './cast.js';
@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 
 // ================================================================ small building blocks
 
@@ -300,7 +300,7 @@ function bindEditor(root, draft, mode = 'card') {
         if (!pre) return;
         const p = normalizeProfile(draft);
         const soft = mode === 'card' && !!getSettings().insight_soft_long && isLongChatOnCard({ source: 'card' });
-        pre.textContent = ctx().substituteParams(buildInsightPrompt(p, readMvuState(p), { source: mode, soft }));
+        pre.textContent = safeSub(buildInsightPrompt(p, readMvuState(p), { source: mode, soft }));
     };
     const updateRecDiff = () => {
         const el = q('[data-rec-diff]');
@@ -573,6 +573,10 @@ export async function openEditor(initial = null, unsaved = false, mode = null) {
         onOpen: p => {
             bindEditor(p.content, draft, mode);
             p.content.addEventListener('input', () => (dirty = true));
+            // Kind chips, add and delete buttons change the draft without an input event
+            p.content.addEventListener('click', e => {
+                if (e.target.closest('[data-kind], [data-add-pair], [data-del-pair], [data-add-rel], [data-del-rel], [data-add-member], [data-del-member], [data-add-change], [data-del-change]')) dirty = true;
+            });
         },
         onClosing: async p => {
             if (p.result === POPUP_RESULT.AFFIRMATIVE) {
@@ -662,7 +666,7 @@ function togglesHtml() {
     const charBlock = cur
         ? `<section class="lmc-sec lmc-sec-char">
             <h4><i class="fa-solid fa-user"></i> ${esc(cur.char.name)} 전용 세트</h4>
-            <p class="lmc-hint">${saved ? '저장된 세트가 있어요. 이 캐릭터 채팅을 열 때, 그리고 프리셋을 다시 불러올 때(연결 프로필 전환 포함) 자동으로 적용돼요.' : '저장된 세트가 없어요. 지금 토글을 이 캐릭터용으로 저장해 두면 다음부터 자동으로 바뀌어요.'} 🔷 Argon·🔶 Carbon 호환은 세트에 넣지 않고 모델을 따라가요.</p>
+            <p class="lmc-hint">${saved ? '저장된 세트가 있어요. 이 캐릭터 채팅을 열면 자동으로 적용되고, 세트가 없는 캐릭터로 옮기면 원래 토글로 돌아가요.' : '저장된 세트가 없어요. 지금 토글을 이 캐릭터용으로 저장해 두면 다음부터 자동으로 바뀌어요.'} 🔷 Argon·🔶 Carbon 호환은 세트에 넣지 않고 모델을 따라가요.</p>
             <div class="lmc-btn-row">
                 <button type="button" class="lmc-btn lmc-btn-lemon" data-save-char><i class="fa-solid fa-floppy-disk"></i> 지금 토글 저장</button>
                 ${saved ? '<button type="button" class="lmc-btn lmc-btn-ghost" data-clear-char><i class="fa-solid fa-eraser"></i> 세트 지우기</button>' : ''}
@@ -714,8 +718,8 @@ export async function openToggles() {
                     await guarded('toggles-save', saveTogglesForCharacter);
                     toast('success', '이 캐릭터용 토글 세트를 저장했어요.');
                 } else if (e.target.closest('[data-clear-char]')) {
-                    await guarded('toggles-clear', clearTogglesForCharacter);
-                    toast('info', '저장된 토글 세트를 지웠어요.');
+                    const back = await guarded('toggles-clear', clearTogglesForCharacter);
+                    toast('info', back ? `저장된 토글 세트를 지우고 원래 토글로 되돌렸어요 (${back}개).` : '저장된 토글 세트를 지웠어요.');
                 } else if (e.target.closest('[data-apply-rec]')) {
                     const n = await setToggles(recommendationChanges(loadProfile()?.recommend));
                     toast(n ? 'success' : 'info', n ? `토글 ${n}개를 바꿨어요.` : '이미 추천과 같아요.');
@@ -806,6 +810,7 @@ function settingsHtml() {
         <p id="lmc_long_hint" class="lmc-long-hint" style="display:none"></p>
         ${switchRow('lmc_insight_enabled', '답변 생성 때 넣기', '레모나에선 「👤 현실적·캐해」 바로 뒤')}
         ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '「🔍 추론」 체크리스트 끝에 한 줄')}
+        ${switchRow('lmc_think_carbon_off', 'Carbon에선 확인 줄 빼기', '🔶 Carbon 호환은 짧게 생각하라고 해요')}
         ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}
         <div class="lmc-subhead"><i class="fa-solid fa-users"></i> 다인봇 · 시뮬봇 · RPG봇</div>
         ${switchRow('lmc_cast_scene', '장면에 나온 인물만 자세히', '이름이 최근 메시지에 나온 인물만 넣고 나머지는 이름만')}
@@ -826,8 +831,10 @@ function settingsHtml() {
         '토글 도우미',
         '택1 · 캐릭터별 세트',
         `<div class="lmc-btn-row"><button type="button" id="lmc_toggles" class="lmc-btn lmc-btn-lemon"><i class="fa-solid fa-sliders"></i> 토글 열기</button></div>
-        ${switchRow('lmc_toggles_auto', '캐릭터별 세트 자동 적용', '채팅 열 때, 프리셋을 다시 불러올 때')}
+        ${switchRow('lmc_toggles_auto', '캐릭터별 세트 자동 적용', '세트가 없는 캐릭터는 원래 토글로 되돌려요')}
+        ${switchRow('lmc_keep_reload', '같은 프리셋을 다시 불러와도 토글 유지', '연결 프로필을 바꿔도 내 토글이 그대로예요')}
         ${switchRow('lmc_model_auto', '모델 따라 🔷/🔶 자동 전환', 'Argon이면 🔷, Carbon이면 🔶만 켜요')}
+        ${switchRow('lmc_model_reasoning', '모델 따라 추론 강도도', 'Argon은 medium, Carbon은 low')}
         ${switchRow('lmc_model_other_off', '다른 모델이면 둘 다 끄기', 'Claude, 3.8 Flash처럼 다른 모델이 분명할 때만')}`,
     );
     const bans = card(
@@ -868,7 +875,7 @@ function settingsHtml() {
         '분석 · 고치기 · 버릇 찾기용',
         `<p class="lmc-hint">연결 프로필을 고르면 본 채팅과 다른(싼) 모델로 돌릴 수 있어요.</p>
         ${selectRow('lmc_api_profile', '연결 프로필')}
-        ${numberRow('lmc_api_tokens', '응답 길이 (토큰)', 300, 16000, 100)}
+        ${numberRow('lmc_api_tokens', '응답 길이 (토큰)', 0, 16000, 100, '0 = 자동 (기본 2000, 로어북·다인봇이면 더 길게)')}
         ${selectRow('lmc_lang', '분석 결과 언어', '<option value="preset">프리셋 서술 언어에 맞춤</option><option value="ko">한국어</option><option value="en">영어</option><option value="card">카드와 같은 언어</option>')}`,
     );
 
@@ -1015,8 +1022,10 @@ function bindSettings() {
             applyActiveState();
         });
     check('#lmc_insight_think', 'insight_think_line');
+    check('#lmc_think_carbon_off', 'insight_think_carbon_off');
     num('#lmc_insight_depth', 'insight_fallback_depth', 0, 20);
     check('#lmc_toggles_auto', 'toggles_auto_apply');
+    check('#lmc_keep_reload', 'toggles_keep_on_reload');
     check('#lmc_lore_enabled', 'lore_enabled');
     check('#lmc_soft_long', 'insight_soft_long');
     check('#lmc_cast_scene', 'cast_scene_only');
@@ -1025,7 +1034,7 @@ function bindSettings() {
     num('#lmc_chat_budget', 'chat_budget', 4000, 80000);
     check('#lmc_lore_global', 'lore_include_global');
     num('#lmc_lore_budget', 'lore_budget', 2000, 60000);
-    for (const [id, key] of [['#lmc_model_auto', 'model_auto_toggle'], ['#lmc_model_other_off', 'model_other_off']]) {
+    for (const [id, key] of [['#lmc_model_auto', 'model_auto_toggle'], ['#lmc_model_other_off', 'model_other_off'], ['#lmc_model_reasoning', 'model_auto_reasoning']]) {
         $(id)
             .prop('checked', !!s[key])
             .on('change', async function () {
@@ -1045,7 +1054,7 @@ function bindSettings() {
     check('#lmc_mvu_rules', 'mvu_inject_rules');
     check('#lmc_mvu_format', 'mvu_inject_format');
     num('#lmc_mvu_delta', 'mvu_max_delta', 1, 50);
-    num('#lmc_api_tokens', 'api_max_tokens', 300, 16000);
+    num('#lmc_api_tokens', 'api_max_tokens', 0, 16000);
     sel('#lmc_lang', 'output_language');
     fillProfiles();
     sel('#lmc_api_profile', 'api_profile');

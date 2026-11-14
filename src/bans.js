@@ -3,7 +3,7 @@
 import { sideGenerate } from './api.js';
 import { ctx, esc, extractJson, getSettings, guarded, isInFlight, LOG, maskNonStory, toast } from './core.js';
 import { DEFAULT_BAN_TEXT } from './bans-default.js';
-import { isActive, presetPromptContent } from './preset.js';
+import { isActive, presetLanguage, presetPromptContent } from './preset.js';
 
 const PARTICLES = ['으로', '이나', '이랑', '처럼', '에게', '한테', '까지', '부터', '은', '는', '이', '가', '을', '를', '도', '만', '의', '에', '과', '와', '로', '나', '랑'];
 const EXACT_ONLY = new Set(['이기', '몰루']); // would collide with ordinary words when particles are stripped
@@ -165,7 +165,7 @@ export function sentenceRanges(text) {
 
 const EXCLAIM_RE = /(?:라니|다니|하고는)[.!?…]*["'”’]?$/;
 const CONTRAST_RE = /[가-힣]+(?:이|가)\s?아니라[,\s]/;
-const NOT_BUT_RE = /\bnot\s+(?:just\s+|only\s+|merely\s+|simply\s+)?[^.!?]{1,60}?\bbut\s+/i;
+const NOT_BUT_RE = /(?<!\b(?:do|does|did|could|would|should|will|can|may|might|must|shall)\s)\bnot\s+(?:just\s+|only\s+|merely\s+|simply\s+)?(?:[\w'-]+\s+){0,4}?[\w'-]+,?\s+but\s+(?!(?:i|you|he|she|it|we|they|there|then|the|this|that|his|her|their|my|your|our)\b)/i;
 const NEGATED_RE = /\b(?:did|was|were|is|are|am|had|has|have|do|does|could|would|should|will|wo|ca|can)n[o']t\b|\b(?:did|was|were|is|are|am|had|has|have|could|would|should|will|can|does|do)\s+not\b|\bnever\s+\w/i;
 
 /**
@@ -374,16 +374,26 @@ export function decorateRecent(onOpen, limit = 30) {
 
 // ---------------------------------------------------------------- fixing
 
-function fixSystemPrompt(rulesText) {
+/** Language the reply is written in, from the preset (or a guess from the text itself). */
+function replyLanguage(text) {
+    const lang = presetLanguage();
+    if (lang) return lang;
+    const hangul = (text.match(/[가-힣]/g) ?? []).length;
+    const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+    return hangul >= latin ? '한국어' : 'English';
+}
+
+function fixSystemPrompt(rulesText, lang) {
+    const korean = /한국|korean/i.test(lang);
     return [
-        'You are a copy editor for a Korean web novel written by an author with strict style rules.',
+        `You are a copy editor for a web novel written in ${korean ? 'Korean' : lang}, by an author with strict style rules.`,
         'You will get the whole reply for context and a numbered list of sentences that break the rules, each with what is wrong.',
-        'Rewrite ONLY those sentences so they break none of the rules below.',
-        '- Keep the meaning, the speaker, the point of view, the tense, the tone and register (존댓말/반말), quotation marks and line breaks exactly as they are.',
+        `Rewrite ONLY those sentences so they break none of the rules below. Write the rewritten sentences in ${korean ? 'Korean' : lang}, the language of the reply; never translate.`,
+        `- Keep the meaning, the speaker, the point of view, the tense, the tone and register${korean ? ' (존댓말/반말)' : ''}, the narrator's voice, quotation marks and line breaks exactly as they are.`,
         '- Change as little as possible. Do not add or remove story content, and do not touch words that are not part of the problem.',
         '- Use plain, natural words. Never swap in a rare, odd, or wrong word just to avoid a banned one, and never use one fixed substitute.',
         '- A banned root covers all its derived forms, so the replacement must not reuse the root.',
-        '- A corrective contrast is rewritten as a direct statement of what is true: "A가 아니라 B" becomes B, "not A but B" becomes B, and a run of negated sentences ("He did not A. He did not B. He C.") becomes the affirmative action alone.',
+        '- A corrective contrast is rewritten as a direct statement of what is true: "A가 아니라 B" becomes B, "not A but B" becomes B, and a run of negated sentences ("He did not A. He did not B. He C.") becomes the affirmative action or one plain sentence. Keep any joke or attitude the original carried.',
         '',
         'Rules:',
         rulesText,
@@ -432,7 +442,7 @@ export async function fixMessage(mesId) {
         try {
             const story = maskNonStory(m.mes).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
             const list = targets.map((t, i) => `${i + 1}. ${t.text}\n   problems: ${t.problems.join('; ')}`).join('\n');
-            const reply = await sideGenerate(fixSystemPrompt(getRules().raw), `<reply>\n${story}\n</reply>\n\n<sentences_to_fix>\n${list}\n</sentences_to_fix>\n\nOutput the JSON object only.`);
+            const reply = await sideGenerate(fixSystemPrompt(getRules().raw, replyLanguage(story)), `<reply>\n${story}\n</reply>\n\n<sentences_to_fix>\n${list}\n</sentences_to_fix>\n\nOutput the JSON object only.`);
             const parsed = extractJson(reply);
             const fixes = Array.isArray(parsed?.fixes) ? parsed.fixes : [];
             let mes = m.mes;
@@ -460,6 +470,12 @@ export async function fixMessage(mesId) {
             const owned = displayOwnedByOther(mesId);
             m.extra ??= {};
             m.extra.lemona_original = m.mes;
+            // SillyTavern swaps m.extra with the swipe's own copy when swiping; keep the undo there too
+            const info = Array.isArray(m.swipe_info) ? m.swipe_info[m.swipe_id ?? 0] : null;
+            if (info) {
+                info.extra ??= {};
+                info.extra.lemona_original = m.mes;
+            }
             m.mes = mes;
             if (Array.isArray(m.swipes) && m.swipes[m.swipe_id ?? 0] !== undefined) m.swipes[m.swipe_id ?? 0] = mes;
             // A display_text that was a plain copy of the message is ours to keep in sync;
@@ -488,6 +504,8 @@ export async function undoFix(mesId) {
     if (Array.isArray(m.swipes) && m.swipes[m.swipe_id ?? 0] !== undefined) m.swipes[m.swipe_id ?? 0] = orig;
     if (typeof m.extra.display_text === 'string' && !owned) m.extra.display_text = orig;
     delete m.extra.lemona_original;
+    const info = Array.isArray(m.swipe_info) ? m.swipe_info[m.swipe_id ?? 0] : null;
+    if (info?.extra) delete info.extra.lemona_original;
     c.updateMessageBlock(mesId, m);
     await c.saveChat();
     await c.eventSource.emit(c.event_types.MESSAGE_EDITED, mesId);

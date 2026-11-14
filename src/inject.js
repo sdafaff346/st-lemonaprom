@@ -1,10 +1,10 @@
 // Prompt assembly. With the Lemona preset the insight goes right after </realism> and a checklist line
 // goes into <thinkingProcess>; with any other preset it falls back to an in-chat extension prompt.
 
-import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, state } from './core.js';
+import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, safeSub, state } from './core.js';
 import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, thinkLineFor } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
-import { detectLemona, isActive } from './preset.js';
+import { detectLemona, isActive, modelToggles } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
 
 const KEYS = Object.freeze({
@@ -15,6 +15,11 @@ const KEYS = Object.freeze({
 });
 
 const ANCHORS = ['</realism>', '</narrative>', '</mainInstruction>'];
+
+/** 🔶 Carbon 호환 is on: it asks for brief thinking, so the extra checklist line stays out. */
+function carbonOn() {
+    return !!modelToggles().carbon?.enabled;
+}
 
 function lemonaChatCompletion() {
     return detectLemona() && ctx().mainApi === 'openai';
@@ -47,7 +52,7 @@ export function refreshInjection() {
     }
     const s = getSettings();
     const c = ctx();
-    const sub = t => c.substituteParams(t);
+    const sub = t => safeSub(t);
     const ins = insightForPrompt();
     const profile = ins?.profile ?? null;
     const mvuState = readMvuState(profile);
@@ -73,7 +78,6 @@ export function onPromptReady(eventData) {
     if (!Array.isArray(chat) || !lemonaChatCompletion()) return;
     // One of our own side requests (analysis, fix, habits)
     if (state.sidePrompts.size && chat.some(m => typeof m?.content === 'string' && state.sidePrompts.has(m.content))) return;
-    const c = ctx();
     const s = getSettings();
     const isText = m => typeof m?.content === 'string';
     const thinkIdx = chat.findIndex(m => isText(m) && m.content.includes('<thinkingProcess>'));
@@ -81,7 +85,7 @@ export function onPromptReady(eventData) {
     const profile = ins?.profile ?? null;
 
     if (profile) {
-        const block = { role: 'system', content: c.substituteParams(buildInsightPrompt(profile, readMvuState(profile), ins.opts)) };
+        const block = { role: 'system', content: safeSub(buildInsightPrompt(profile, readMvuState(profile), ins.opts)) };
         let placed = false;
         for (const anchor of ANCHORS) {
             const idx = chat.findIndex(m => isText(m) && m.content.includes(anchor));
@@ -97,8 +101,8 @@ export function onPromptReady(eventData) {
     const thinkAt = chat.findIndex(m => isText(m) && m.content.includes('<thinkingProcess>'));
     if (thinkAt === -1) return;
     let t = chat[thinkAt].content;
-    if (profile && s.insight_think_line) {
-        const line = c.substituteParams(thinkLineFor(profile));
+    if (profile && s.insight_think_line && !(s.insight_think_carbon_off && carbonOn())) {
+        const line = safeSub(thinkLineFor(profile));
         t = t.includes('\nNarration is in') ? t.replace('\nNarration is in', `${line}\nNarration is in`) : t.replace('</thinkingProcess>', `${line.trimStart()}\n</thinkingProcess>`);
     }
     // Any MVU card needs its update block, not only ours

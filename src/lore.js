@@ -3,7 +3,7 @@
 // technical entries (variables, scripts, status-bar HTML), ranks what is left by how much it is
 // about this character, and fits it into a character budget.
 
-import { ctx, getSettings, LOG } from './core.js';
+import { ctx, getSettings, LOG, safeSub } from './core.js';
 
 const PER_ENTRY_MAX = 1500;
 
@@ -108,12 +108,14 @@ export async function collectLore(char, settings = getSettings()) {
     const usable = [];
     for (const e of raw) {
         if (e.disable) continue;
-        const content = stripMarkup(c.substituteParams ? c.substituteParams(String(e.content ?? '')) : e.content);
-        if (content.length < 20) continue;
+        // Technical entries are dropped before anything is substituted, and only names are filled in:
+        // running the full macro engine here could fire a {{setvar}} hidden in an entry
         if (isTechnicalEntry(e)) {
             skipped++;
             continue;
         }
+        const content = stripMarkup(safeSub(String(e.content ?? '')));
+        if (content.length < 20) continue;
         const keys = (Array.isArray(e.key) ? e.key : []).filter(Boolean);
         const title = String(e.comment ?? '').trim() || keys.slice(0, 3).join(', ') || '(제목 없음)';
         const head = `${title} ${keys.join(' ')} ${content.slice(0, 400)}`;

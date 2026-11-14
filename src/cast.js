@@ -144,6 +144,7 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text }
             ? 'These notes were updated from the chat so far and describe everyone as they are now.'
             : 'These notes come from the card: the baseline everyone started from.',
         'Express them through action, choice, tone and subtext; never state the notes outright or list them as traits.',
+        'These notes are raw material for the voice the style section sets, never a replacement for it: the narration stays in that voice and nothing here is explained or analysed on the page.',
         'The story so far outranks these notes. Wherever the chat has already changed someone (a relationship moved, a belief broke, they softened or hardened), keep the change and read the notes as the history underneath it.',
     ];
     if (soft) out.push('This chat has run long and the notes may be out of date: use them only for what people want and fear, and take how they act and talk from the chat itself.');

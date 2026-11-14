@@ -24,8 +24,9 @@ export function normalizeMvuState(raw, profile, fallback) {
     };
 }
 
+/** MVU is installed and this chat actually carries MVU variables (an MVU card, not just the extension). */
 export function mvuActive() {
-    return !!state.mvu && getSettings().mvu_enabled;
+    return !!state.mvu && getSettings().mvu_enabled && latestStatData() !== null;
 }
 
 /** stat_data of the newest message that carries MVU data (MVU stores it per swipe). */

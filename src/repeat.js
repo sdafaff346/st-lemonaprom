@@ -6,7 +6,14 @@ import { chatIdentity, cleanText, ctx, extractJson, getMeta, getSettings, guarde
 
 const PARTICLES = ['으로', '에게', '한테', '까지', '부터', '처럼', '은', '는', '이', '가', '을', '를', '도', '만', '의', '에', '과', '와', '로'];
 const STOP = new Set(
-    `그 그는 그가 그의 그를 그녀 그녀는 그녀가 그녀의 그녀를 그들 이 저 것 수 듯 때 더 좀 안 못 또 다시 다 잘 왜 뭐 네 응 아 어 음 그래 그냥 정말 너무 아주 조금 이미 아직 그리고 하지만 그런데 그러나 그래서 있었다 없었다 했다 했고 하는 하고 있는 있던 없는 같은 같았다 같이 위해 대해 통해 보다 보며 듯이 것이다 것이었다 거였다 말했다 물었다 대답했다 the a an and or of to in is was he she it`.split(/\s+/),
+    (`그 그는 그가 그의 그를 그녀 그녀는 그녀가 그녀의 그녀를 그들 이 저 것 수 듯 때 더 좀 안 못 또 다시 다 잘 왜 뭐 네 응 아 어 음 그래 그냥 정말 너무 아주 조금 이미 아직 그리고 하지만 그런데 그러나 그래서 있었다 없었다 했다 했고 하는 하고 있는 있던 없는 같은 같았다 같이 위해 대해 통해 보다 보며 듯이 것이다 것이었다 거였다 말했다 물었다 대답했다 ` +
+        // English function words: grammar every reply needs ("could have", "had been", "did not") is never a habit
+        `the a an and or but nor so yet for of to in on at by with from into onto upon about over under after before since until than as like off out up down through across against between without within around
+        i me my mine myself you your yours yourself he him his himself she her hers herself it its itself we us our ours ourselves they them their theirs themselves one ones
+        this that these those there here then now when where while what which who whom whose why how if because though although just only even still also too very really much more most less least such some any no not never nothing anything something everything all each every both either neither other another same own
+        is am are was were be been being have has had having do does did doing done will would shall should can could may might must ought
+        isn wasn weren aren don doesn didn hasn haven hadn won wouldn shouldn couldn can't don't didn't wasn't isn't won't wouldn't couldn't shouldn't i'm it's that's he's she's they're you're we're i'd he'd she'd i'll
+        said says say asked ask told tell looked look went go got get made make let back again away once`).split(/\s+/).filter(Boolean),
 );
 
 function normalizeToken(tok) {
@@ -173,8 +180,9 @@ export function buildBreakerNote(repeats, habits) {
     if (opening) lines.push(`${n++}. Opening the reply the same way as before (e.g. "${opening.phrase}").`);
     lines.push(
         'For this reply:',
-        '- Do not write these in any wording, and do not swap in their nearest cousin.',
-        '- Do not overcorrect either: the story beat behind a habit can still happen, shown in a fresh way, or left out if it does not matter here.',
+        '- Find a fresh way for these: different wording, or a different beat. Ordinary words and grammar stay free to use.',
+        '- Keep the voice the style section sets; this note changes what repeats, not how the story sounds.',
+        '- Do not overcorrect: the story beat behind a habit can still happen, shown in a fresh way, or left out if it does not matter here.',
         '- Never mention or hint that anything is being avoided.]',
     );
     return lines.join('\n');

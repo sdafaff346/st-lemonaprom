@@ -13,11 +13,11 @@
 
 import { afterCharacterToggles, flushSettle, registerAutoToggle, scheduleSettle } from './src/autotoggle.js';
 import { decorateMessage, decorateRecent, fixableIssues, fixMessage, scanMessage, stillGenerating } from './src/bans.js';
-import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, state, toast } from './src/core.js';
+import { ctx, currentCharacter, ensureFullCharacter, getSettings, LOG, safeSub, state, toast } from './src/core.js';
 import { insightForPrompt, onPromptReady, refreshInjection } from './src/inject.js';
 import { buildInsightPrompt } from './src/insight.js';
 import { readMvuState, watchForMvu } from './src/mvu.js';
-import { applyCharacterToggles, detectLemona, healthCheck, inactiveReason, isActive } from './src/preset.js';
+import { applyTogglesForChat, detectLemona, healthCheck, inactiveReason, isActive, rememberBaseline } from './src/preset.js';
 import { analyzeHabits } from './src/repeat.js';
 import { addMenuButtons, applyActiveState, lastReplyId, mountSettings, openBanReport, openEditor, openToggles, runAnalysis, runChatAnalysis, setPower, syncActiveState, updateStatus } from './src/ui.js';
 
@@ -84,7 +84,7 @@ function registerCommand() {
                         break;
                     case 'show': {
                         const ins = currentCharacter() ? insightForPrompt() : null;
-                        return ins ? ctx().substituteParams(buildInsightPrompt(ins.profile, readMvuState(ins.profile), ins.opts)) : '';
+                        return ins ? safeSub(buildInsightPrompt(ins.profile, readMvuState(ins.profile), ins.opts)) : '';
                     }
                     case 'health':
                         if (reason) return reason === 'off' ? '레모나 도우미가 꺼져 있어요.' : '레모나 프리셋이 아니라서 쉬고 있어요.';
@@ -105,7 +105,7 @@ function registerCommand() {
                 }),
             ],
             helpString:
-                '<div>레모나 도우미. <code>analyze</code> 카드 분석, <code>edit</code> 캐해 편집, <code>toggles</code> 토글 도우미, <code>check [번호]</code> 금지어 검사, <code>fix [번호]</code> AI로 고치기, <code>habits</code> AI 버릇 찾기, <code>show</code> 캐해 주입 텍스트, <code>health</code> 프리셋 점검, <code>on</code> / <code>off</code> 켜기·끄기.</div>',
+                '<div>레모나 도우미. <code>analyze</code> 카드 분석, <code>reread</code> 채팅 반영 분석, <code>edit</code> 캐해 편집, <code>toggles</code> 토글 도우미, <code>check [번호]</code> 금지어 검사, <code>fix [번호]</code> AI로 고치기, <code>habits</code> AI 버릇 찾기, <code>show</code> 캐해 주입 텍스트, <code>health</code> 프리셋 점검, <code>on</code> / <code>off</code> 켜기·끄기.</div>',
         }),
     );
 }
@@ -115,7 +115,8 @@ async function onChatChanged() {
     detectLemona();
     if (isActive() && getSettings().toggles_auto_apply && currentCharacter()) {
         try {
-            await applyCharacterToggles();
+            // The character's set, or the user's own toggles back when this character has none
+            await applyTogglesForChat();
         } catch (e) {
             console.warn(LOG, 'auto toggle apply failed', e);
         }
@@ -142,6 +143,8 @@ function init() {
         if (!dryRun && type !== 'quiet') {
             try {
                 await flushSettle();
+                // While no character set is in force, the toggles in use are the user's own
+                if (isActive()) rememberBaseline();
             } catch (e) {
                 console.warn(LOG, 'toggle sync before sending failed', e);
             }
@@ -159,10 +162,10 @@ function init() {
         refreshInjection();
         updateStatus();
     });
-    for (const ev of [event_types.OAI_PRESET_CHANGED_AFTER, event_types.SETTINGS_UPDATED].filter(Boolean)) {
-        // Switching presets can wake the extension up or put it to sleep
-        eventSource.on(ev, () => applyActiveState({ announce: true }));
-    }
+    // Switching presets can wake the extension up or put it to sleep
+    if (event_types.OAI_PRESET_CHANGED_AFTER) eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => applyActiveState({ announce: true }));
+    // SETTINGS_UPDATED fires on every settings save, so only react when active/inactive actually flipped
+    if (event_types.SETTINGS_UPDATED) eventSource.on(event_types.SETTINGS_UPDATED, () => syncActiveState());
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, mesId => {
         decorate(mesId);
         updateStatus();

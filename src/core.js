@@ -20,7 +20,7 @@ export const defaultSettings = Object.freeze({
 
     // side API
     api_profile: '', // '' = main API
-    api_max_tokens: 2000,
+    api_max_tokens: 0, // 0 = automatic (2000, more for lorebooks and casts); any other number is used as is
     output_language: 'preset',
 
     // insight
@@ -28,6 +28,7 @@ export const defaultSettings = Object.freeze({
     insight_enabled: true,
     insight_fallback_depth: 4,
     insight_think_line: true,
+    insight_think_carbon_off: true, // 🔶 Carbon asks for brief thinking: no extra checklist line there
 
     // long chats
     insight_soft_long: true, // card version in a long chat: deep motives only
@@ -51,8 +52,12 @@ export const defaultSettings = Object.freeze({
 
     // preset toggles
     toggles_auto_apply: true,
+    toggles_keep_on_reload: true, // re-selecting the same preset (a connection profile, say) keeps the current toggles
+    toggle_baseline: null, // { preset, snap }: the user's own toggles, restored for characters without a set
+    toggle_set_active: false, // the toggles on screen came from a character's set
     model_auto_toggle: true, // 🔷 Argon / 🔶 Carbon follow the connected model
     model_other_off: true, // any other model turns both off
+    model_auto_reasoning: true, // reasoning effort follows too: Argon medium, Carbon low
 
     // ban checker
     bans_enabled: true,
@@ -83,9 +88,33 @@ export function getSettings() {
     if (!extensionSettings[MODULE]) extensionSettings[MODULE] = structuredClone(defaultSettings);
     const s = extensionSettings[MODULE];
     for (const key of Object.keys(defaultSettings)) {
-        if (!Object.hasOwn(s, key)) s[key] = defaultSettings[key];
+        if (!Object.hasOwn(s, key)) s[key] = structuredClone(defaultSettings[key]);
+    }
+    // v1.8.0: 2000 used to be the fixed default and silently got raised; it now means "automatic"
+    if (!s._migrated_180) {
+        if (Number(s.api_max_tokens) === 2000) s.api_max_tokens = 0;
+        s._migrated_180 = true;
     }
     return s;
+}
+
+/** Response length for a side call: the user's number when set, otherwise `auto`. */
+export function sideMaxTokens(auto = 2000) {
+    const n = Number(getSettings().api_max_tokens);
+    return n > 0 ? n : auto;
+}
+
+/**
+ * {{char}} and {{user}} only. SillyTavern's substituteParams also runs {{setvar}}, {{addvar}} and
+ * friends, so card or lorebook text sent to an analysis call could change the chat's variables.
+ */
+export function safeSub(text) {
+    const c = ctx();
+    const charName = c.name2 ?? currentCharacter()?.char?.name ?? '{{char}}';
+    const userName = c.name1 ?? '{{user}}';
+    return String(text ?? '')
+        .replace(/\{\{\s*char\s*\}\}|<bot>|<char>/gi, charName)
+        .replace(/\{\{\s*user\s*\}\}|<user>/gi, userName);
 }
 
 export function saveSettings() {
@@ -181,8 +210,13 @@ export function extractJson(reply) {
         .trim();
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('응답에서 JSON을 찾지 못했어요. (설정의 응답 길이를 늘려 보세요)');
-    return JSON.parse(cleaned.slice(start, end + 1));
+    const cut = '응답이 중간에 잘렸거나 형식이 깨졌어요. 서랍 🔌 보조 API의 응답 길이를 늘리고 다시 해 보세요.';
+    if (start === -1 || end <= start) throw new Error(cut);
+    try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+    } catch {
+        throw new Error(cut);
+    }
 }
 
 // ---------------------------------------------------------------- character storage

@@ -1,7 +1,7 @@
 // Modules 1 & 2: two-layer reading and colliding value pairs. Model-facing text is English.
 
 import { sideGenerate } from './api.js';
-import { cleanText, ctx, currentCharacter, ensureFullCharacter, extractJson, getMeta, getSettings, isStoryMessage, LIMITS, maskNonStory, readCharData, saveMeta, toPercent, writeCharData } from './core.js';
+import { cleanText, ctx, currentCharacter, ensureFullCharacter, extractJson, getMeta, getSettings, isStoryMessage, LIMITS, maskNonStory, readCharData, safeSub, saveMeta, sideMaxTokens, toPercent, writeCharData } from './core.js';
 import { buildCastPrompt, CAST_THINK_LINE, isCastKind, KIND_LABELS, normalizeCast, normalizeKind, normalizeWorld } from './cast.js';
 import { collectLore } from './lore.js';
 import { presetLanguage } from './preset.js';
@@ -297,7 +297,7 @@ export async function analyzeCurrentCharacter({ onLore, kind = null } = {}) {
         ['Example dialogue', clip(pick('mes_example'), 4000)],
         ["Creator's notes", clip(pick('creator_notes'), 1500)],
     ].filter(([, v]) => v);
-    const card = ctx().substituteParams(`<character_card>\n${sections.map(([k, v]) => `## ${k}\n${v}`).join('\n\n')}\n</character_card>`);
+    const card = safeSub(`<character_card>\n${sections.map(([k, v]) => `## ${k}\n${v}`).join('\n\n')}\n</character_card>`);
     const settings = getSettings();
     const lore = await collectLore(char, settings);
     onLore?.(lore);
@@ -306,7 +306,7 @@ export async function analyzeCurrentCharacter({ onLore, kind = null } = {}) {
     const forced = kind ? normalizeKind(kind) : null;
     // A cast or a world needs more room than one person
     const roomy = lore.text || forced !== 'single';
-    const reply = await sideGenerate(analysisSystemPrompt(settings, forced), input, roomy ? { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, forced && forced !== 'single' ? 3500 : 2500) } : {});
+    const reply = await sideGenerate(analysisSystemPrompt(settings, forced), input, { maxTokens: sideMaxTokens(!roomy ? 2000 : forced && forced !== 'single' ? 3500 : 2500) });
     const json = extractJson(reply) ?? {};
     const profile = normalizeProfile({ ...json, kind: forced ?? json.kind, lore: lore.used ? { books: lore.books, used: lore.used } : null });
     // A fixed group of characters is exactly what Lemona's 「👥 다인봇 시장통 방지」 is for
@@ -390,9 +390,9 @@ export async function analyzeChatEvolution({ onLore } = {}) {
         `<story_so_far messages="${story.used} of ${story.total}, most recent">\n${story.text}\n</story_so_far>`,
         'Update the reading of {{char}} for where the story is now. Output the JSON object only.',
     ].filter(Boolean);
-    const input = c.substituteParams(parts.join('\n\n'));
+    const input = safeSub(parts.join('\n\n'));
     const kind = normalizeKind(prev?.kind);
-    const reply = await sideGenerate(analysisSystemPrompt(settings, prev ? kind : null) + UPDATE_RULES, input, { maxTokens: Math.max(Number(settings.api_max_tokens) || 2000, kind === 'single' ? 2500 : 3500) });
+    const reply = await sideGenerate(analysisSystemPrompt(settings, prev ? kind : null) + UPDATE_RULES, input, { maxTokens: sideMaxTokens(kind === 'single' ? 2500 : 3500) });
     const json = extractJson(reply) ?? {};
     const profile = normalizeProfile({
         ...json,
@@ -438,6 +438,7 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
         '<character_insight for="{{char}}">',
         head,
         'Express it through action, choice, tone and subtext; never state these notes outright, never have {{char}} recite them, and never list them as traits.',
+        'These notes are raw material for the voice the style section sets, never a replacement for it: the narration stays in that voice, the fear and the cost show at most as a flicker, and nothing here is explained or analysed on the page.',
         'The story so far outranks these notes. Wherever the chat has already shown {{char}} change (warmer or colder, broken, decided otherwise, a relationship moved), keep the change and read the notes as the history underneath it, never as a state to snap back to.',
     ];
     if (soft) out.push('This chat has run long and the notes may be out of date: use them only for the deep motives below, and take how {{char}} acts and talks from the chat itself.');

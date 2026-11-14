@@ -1,6 +1,6 @@
 // Side API calls: a Connection Manager profile if one is chosen, otherwise the main API.
 
-import { CancelledError, ctx, getSettings, LOG, state } from './core.js';
+import { CancelledError, ctx, getSettings, LOG, sideMaxTokens, state } from './core.js';
 
 /** [{ id, name }] of usable connection profiles, or [] when Connection Manager is off. */
 export function listProfiles() {
@@ -76,7 +76,7 @@ async function viaProfile(c, s, system, user, maxTokens) {
  */
 export async function sideGenerate(system, user, opts = {}) {
     const s = getSettings();
-    const maxTokens = Number(opts.maxTokens ?? s.api_max_tokens) || 2000;
+    const maxTokens = Number(opts.maxTokens) || sideMaxTokens();
     const c = ctx();
     // Our own prompt passes through CHAT_COMPLETION_PROMPT_READY too; it is recognised by its exact
     // system text, so a real reply generated at the same time still gets its insight.

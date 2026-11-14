@@ -250,7 +250,11 @@ export function healthCheck() {
         if (/\bcarbon\b/i.test(model) && !carbon?.enabled) out.push({ level: 'info', text: 'Gemini 4 Carbon을 쓰고 있어요. 🔶 Carbon 호환을 켜면 좋아요.' });
     }
     // Carbon rejects non-zero penalties with HTTP 400, and works best with low reasoning
-    if (carbon?.enabled || /\bcarbon\b/i.test(model)) out.push(...carbonSettingNotices());
+    if (carbon?.enabled || /\bcarbon\b/i.test(model)) {
+        const notes = carbonSettingNotices();
+        // With reasoning following the model, the effort notice resolves itself on the next send
+        out.push(...(getSettings().model_auto_toggle && getSettings().model_auto_reasoning ? notes.filter(n => n.level === 'warn') : notes));
+    }
     if (state.mvu && /Output only the story/.test(presetPromptContent('lm_think'))) {
         out.push({ level: 'info', text: 'MVU 감지: 추론의 "Output only the story" 줄은 확장이 보낼 때마다 "본문 뒤 변수 블록"으로 바꿔서 보내요.' });
     }
@@ -342,8 +346,17 @@ export function modelToggleChanges(model = currentModelName(), settings = getSet
 }
 
 // ---------------------------------------------------------------- per-character toggle sets
+// A character's set is the toggles to use with that character. Everything else uses the user's own
+// toggles (the "baseline"), which are remembered whenever no set is in force and put back when a
+// character without a set is opened. 🔷 / 🔶 are never part of either: they follow the model.
 
-/** Snapshot of all optional toggles (택1 groups + 선택 entries). */
+const PRESET_KEY = '__preset';
+
+export function currentPresetName() {
+    return String(settingsObj()?.preset_settings_openai ?? '');
+}
+
+/** Snapshot of all optional toggles (택1 groups + 선택 entries), without 🔷 / 🔶 unless asked. */
 export function snapshotToggles({ withModel = false } = {}) {
     const { groups, optional } = readToggles();
     const skip = withModel ? new Set() : modelToggleIds();
@@ -353,24 +366,120 @@ export function snapshotToggles({ withModel = false } = {}) {
     return snap;
 }
 
+/** The open character's saved set: { preset, ids } (preset is '' for sets saved before v1.8.0). */
+export function savedSet() {
+    const raw = readCharData().toggles;
+    if (!raw || typeof raw !== 'object') return null;
+    const { [PRESET_KEY]: preset = '', ...ids } = raw;
+    return Object.keys(ids).length ? { preset: String(preset), ids } : null;
+}
+
+/** Only ids the active preset has, minus 🔷 / 🔶 (sets saved before v1.4.0 may still carry them). */
+function applicable(ids) {
+    const known = new Set(Object.keys(snapshotToggles()));
+    return Object.fromEntries(Object.entries(ids ?? {}).filter(([id]) => known.has(id)));
+}
+
 export async function saveTogglesForCharacter() {
-    await writeCharData({ toggles: snapshotToggles() });
+    const s = getSettings();
+    // What is on screen right now becomes this character's set; the user's own toggles stay as they were
+    if (!s.toggle_set_active && !s.toggle_baseline) rememberBaseline();
+    await writeCharData({ toggles: { ...snapshotToggles(), [PRESET_KEY]: currentPresetName() } });
+    s.toggle_set_active = true;
+    saveSettings();
 }
 
 export async function clearTogglesForCharacter() {
     await writeCharData({ toggles: null });
+    return restoreBaseline({ silent: true });
 }
 
-export async function applyCharacterToggles({ silent = false } = {}) {
-    if (!detectLemona()) return 0;
-    const saved = readCharData().toggles;
-    if (!saved || typeof saved !== 'object') return 0;
-    // snapshotToggles() leaves out 🔷 / 🔶, so sets saved before v1.4.0 stop overriding the model too
-    const known = new Set(Object.keys(snapshotToggles()));
-    const changes = Object.fromEntries(Object.entries(saved).filter(([id]) => known.has(id)));
-    const n = await setToggles(changes);
-    if (n && !silent) toast('info', `이 캐릭터용 레모나 토글로 바꿨어요 (${n}개 변경).`);
+/** Records the user's own toggles. Only while no character set is in force. */
+export function rememberBaseline() {
+    const s = getSettings();
+    if (s.toggle_set_active || !detectLemona()) return false;
+    const snap = snapshotToggles();
+    const preset = currentPresetName();
+    const prev = s.toggle_baseline;
+    if (prev && prev.preset === preset && JSON.stringify(prev.snap) === JSON.stringify(snap)) return false;
+    s.toggle_baseline = { preset, snap };
+    saveSettings();
+    return true;
+}
+
+/** Puts the user's own toggles back after a character set. */
+export async function restoreBaseline({ silent = false } = {}) {
+    const s = getSettings();
+    if (!s.toggle_set_active) return 0;
+    s.toggle_set_active = false;
+    saveSettings();
+    const b = s.toggle_baseline;
+    if (!b || b.preset !== currentPresetName()) return 0;
+    const n = await setToggles(applicable(b.snap));
+    if (n && !silent) toast('info', `이 캐릭터는 저장된 세트가 없어서 원래 토글로 되돌렸어요 (${n}개).`);
     return n;
+}
+
+/**
+ * Toggles for the chat that just opened: the character's set if it has one for this preset,
+ * otherwise the user's own toggles.
+ */
+export async function applyTogglesForChat({ silent = false } = {}) {
+    if (!detectLemona()) return 0;
+    const s = getSettings();
+    rememberBaseline(); // no-op while a set is in force
+    const set = savedSet();
+    const preset = currentPresetName();
+    if (set && (!set.preset || set.preset === preset)) {
+        const n = await setToggles(applicable(set.ids));
+        if (!s.toggle_set_active) {
+            s.toggle_set_active = true;
+            saveSettings();
+        }
+        if (n && !silent) toast('info', `이 캐릭터용 레모나 토글로 바꿨어요 (${n}개 변경).`);
+        return n;
+    }
+    if (set && !silent) {
+        toast('info', `이 캐릭터의 토글 세트는 다른 프리셋(${set.preset})에서 저장한 거라 적용하지 않았어요. 지금 프리셋에서 다시 저장해 주세요.`, '레모나', { timeOut: 8000 });
+    }
+    return restoreBaseline({ silent });
+}
+
+/** @deprecated kept for the slash command and older callers */
+export async function applyCharacterToggles(opts = {}) {
+    return applyTogglesForChat(opts);
+}
+
+/** A different preset was loaded: its own file state is the new baseline, and no set is in force. */
+export function resetForNewPreset() {
+    const s = getSettings();
+    s.toggle_set_active = false;
+    s.toggle_baseline = null;
+    saveSettings();
+}
+
+// ---------------------------------------------------------------- reasoning effort
+
+const REASONING_FOR = { argon: 'medium', carbon: 'low' };
+
+/** Reasoning effort the model family wants, or '' to leave it alone. */
+export function reasoningFor(family) {
+    return REASONING_FOR[family] ?? '';
+}
+
+export function currentReasoning() {
+    return String(settingsObj()?.reasoning_effort ?? '');
+}
+
+/** Sets Chat Completion's reasoning effort the way its own dropdown would. */
+export function setReasoning(value) {
+    const oai = settingsObj();
+    if (!oai || !value || oai.reasoning_effort === value) return false;
+    const $sel = typeof $ === 'function' ? $('#openai_reasoning_effort') : null;
+    if ($sel?.length && $sel.find(`option[value="${value}"]`).length) $sel.val(value).trigger('input');
+    oai.reasoning_effort = value;
+    saveSettings();
+    return true;
 }
 
 // ---------------------------------------------------------------- recommendations
