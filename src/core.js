@@ -27,7 +27,7 @@ export const defaultSettings = Object.freeze({
     insight_module: true, // the whole 캐릭터 해석 feature; off = no analysis, no insight prompt, no MVU tracking
     insight_enabled: true,
     insight_fallback_depth: 4,
-    insight_think_line: true,
+    insight_think_line: false, // v8.0's 🔍 steps (Character, Inside) already cover it
     insight_think_carbon_off: true, // 🔶 Carbon asks for brief thinking: no extra checklist line there
 
     // long chats
@@ -94,6 +94,11 @@ export function getSettings() {
     if (!s._migrated_180) {
         if (Number(s.api_max_tokens) === 2000) s.api_max_tokens = 0;
         s._migrated_180 = true;
+    }
+    // v1.9.0: Lemona v8.0's reasoning already walks through the character; the extra line is opt-in now
+    if (!s._migrated_190) {
+        s.insight_think_line = false;
+        s._migrated_190 = true;
     }
     return s;
 }

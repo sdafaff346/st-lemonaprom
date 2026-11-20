@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 
 // ================================================================ small building blocks
 
@@ -809,7 +809,7 @@ function settingsHtml() {
         </div>
         <p id="lmc_long_hint" class="lmc-long-hint" style="display:none"></p>
         ${switchRow('lmc_insight_enabled', '답변 생성 때 넣기', '레모나에선 「👤 현실적·캐해」 바로 뒤')}
-        ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '「🔍 추론」 체크리스트 끝에 한 줄')}
+        ${switchRow('lmc_insight_think', '추론에 캐해 확인 줄', '기본 꺼짐. v8.0 추론이 이미 캐릭터를 짚어요')}
         ${switchRow('lmc_think_carbon_off', 'Carbon에선 확인 줄 빼기', '🔶 Carbon 호환은 짧게 생각하라고 해요')}
         ${numberRow('lmc_insight_depth', '다른 프리셋일 때 깊이', 0, 20, 1, '「레모나에서만」을 껐을 때만 써요')}
         <div class="lmc-subhead"><i class="fa-solid fa-users"></i> 다인봇 · 시뮬봇 · RPG봇</div>

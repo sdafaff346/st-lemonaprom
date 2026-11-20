@@ -431,45 +431,33 @@ function leanText(a, b, lean) {
 export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text } = {}) {
     if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text });
     const l = profile.layers;
-    const head = source === 'chat'
-        ? "A reading of {{char}} as they are now in this story, updated from the card by what has happened in the chat. Use it to fill in the realism rules above with this specific person."
-        : "A reading of {{char}}'s inner logic taken from the character card: the baseline they started from. Use it to fill in the realism rules above with this specific person.";
+    // A light author-side note: v8.0's realism and 🔍 steps already do the character work, this only
+    // hands them the specifics of this one person. Costs and fears stay out of the page entirely.
     const out = [
         '<character_insight for="{{char}}">',
-        head,
-        'Express it through action, choice, tone and subtext; never state these notes outright, never have {{char}} recite them, and never list them as traits.',
-        'These notes are raw material for the voice the style section sets, never a replacement for it: the narration stays in that voice, the fear and the cost show at most as a flicker, and nothing here is explained or analysed on the page.',
-        'The story so far outranks these notes. Wherever the chat has already shown {{char}} change (warmer or colder, broken, decided otherwise, a relationship moved), keep the change and read the notes as the history underneath it, never as a state to snap back to.',
+        source === 'chat'
+            ? 'A short note for you, the author, on what moves {{char}} as they are now in this story. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.'
+            : 'A short note for you, the author, on what moves {{char}}, read from the card. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.',
+        'It is not a conscience and not a script: none of it is stated, recited, listed, or analysed on the page, and none of it turns into guilt, moral weighing, or self-explanation. It shows only through what {{char}} does and says, in the voice the style section sets.',
+        'Where the chat has already changed {{char}}, the chat wins; this is the history underneath.',
     ];
-    if (soft) out.push('This chat has run long and the notes may be out of date: use them only for the deep motives below, and take how {{char}} acts and talks from the chat itself.');
+    if (soft) out.push('The chat has run long: take how {{char}} acts and talks from the chat itself, and use this only for what they want underneath.');
     const changes = profile.changes ?? [];
-    if (changes.length) out.push('', '[How {{char}} has changed in this story] Earned through the chat; keep them, while the older layer still shows underneath:', ...changes.map(t => `- ${t}`));
-    const layerLines = [
-        !soft && l.surface && `- Surface (what others see): ${l.surface}`,
-        l.desire && `- Core desire (what they actually want): ${l.desire}`,
-        l.fear && `- Fear / wound (surfaces rarely, in a flash, and is shoved away): ${l.fear}`,
-        l.self_deception && `- Self-deception (what they wrongly believe about themselves): ${l.self_deception}`,
+    if (changes.length) out.push('', 'Changed in this story (keep):', ...changes.map(t => `- ${t}`));
+    const lines = [
+        l.desire && `- Wants: ${l.desire}`,
+        !soft && l.surface && `- Shows others: ${l.surface}`,
+        l.self_deception && `- Tells themselves: ${l.self_deception}`,
+        l.fear && `- Underneath, rarely touched: ${l.fear}`,
     ].filter(Boolean);
-    if (layerLines.length) {
-        out.push('', '[Two layers]', ...layerLines);
-        if (mvuState) out.push(`- Mask crack right now: ${mvuState.가면균열}/100 — ${crackBand(mvuState.가면균열)}.`);
-    }
-    if (profile.pairs.length) {
-        out.push('', '[Colliding values] When a scene forces these against each other, {{char}} leans as marked. Going against the lean is possible, but it always leaves the listed cost.');
-        profile.pairs.forEach((p, i) => {
-            const lean = mvuState?.기울기[i] ?? p.lean;
-            out.push(`${i + 1}. "${p.a}" vs "${p.b}" — currently ${leanText(p.a, p.b, lean)} (${lean}/100 toward "${p.a}").`);
-            if (p.behavior && !soft) out.push(`   When they collide: ${p.behavior}`);
-            if (p.cost && !soft) out.push(`   Cost of going against the lean: ${p.cost}`);
-        });
-        if (mvuState?.최근갈등) out.push(`Most recent dilemma: ${mvuState.최근갈등}`);
-    }
-    const relations = profile.relations ?? [];
-    if (relations.length && !soft) {
-        out.push('', '[Around key people] Only when this person is present or on {{char}}\'s mind:');
-        for (const r of relations) out.push(`- ${r.who}: ${r.shows}`);
-    }
-    out.push('', 'Use only the parts this moment actually touches; most replies need one or none. These are tendencies, not rules: {{char}} may surprise, contradict themselves, act out of mood, or change when the story gives a reason. Contradiction between the layers is intended: keep it alive instead of resolving it.', '</character_insight>');
+    if (mvuState && lines.length) lines.push(`- Mask right now: ${crackBand(mvuState.가면균열)}.`);
+    profile.pairs.forEach((p, i) => {
+        const lean = mvuState?.기울기[i] ?? p.lean;
+        lines.push(`- Pulled between "${p.a}" and "${p.b}": ${leanText(p.a, p.b, lean)}.${p.behavior && !soft ? ` When it bites: ${p.behavior}` : ''}`);
+    });
+    if (!soft) for (const r of profile.relations ?? []) lines.push(`- With ${r.who}: ${r.shows}`);
+    if (lines.length) out.push('', ...lines);
+    out.push('', 'Most replies touch one of these or none. People surprise themselves; let them.', '</character_insight>');
     return out.join('\n');
 }
 
@@ -481,4 +469,4 @@ export function thinkLineFor(profile) {
 export { KIND_LABELS };
 
 /** Extra checklist line for Lemona's <thinkingProcess>. */
-export const THINK_LINE = '\n- Insight: does this moment press on one side of {{char}}\'s two layers, or force one of their value pairs? If so, which way they lean and what it costs, as {{char}} is now in this story (what the chat has established beats the notes); if not, leave it out.';
+export const THINK_LINE = '\n- Insight note: only if this moment touches it, let it sharpen steps 2 and 3, as {{char}} is now in this story; it never shows as analysis.';

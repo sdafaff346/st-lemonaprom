@@ -108,7 +108,7 @@ export function splitPresent(cast, kind, text = recentSceneText()) {
 // ---------------------------------------------------------------- prompt text
 
 const HEAD = {
-    multi: "This card plays a group of characters. Each has their own inner logic below. Keep their wants, fears and voices distinct so they never blend into one temperament; let them disagree, misread each other and pursue their own aims in the same scene.",
+    multi: "This card plays a group of characters. Each has their own inner logic below. Keep their wants and voices distinct so they never blend into one temperament; let them disagree, misread each other and pursue their own aims in the same scene.",
     sim: "{{char}} runs a simulated world with many people in it. Below are notes on how that world treats people and on its recurring characters. Every person on screen, named here or not, wants something of their own and acts on it.",
     rpg: "{{char}} runs a game-like world. Below are notes on how that world works and on its recurring characters. NPCs act on their own wants: they help, refuse, bargain or turn on {{user}} for their own reasons, and remember what {{user}} actually did.",
 };
@@ -143,9 +143,8 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text }
         source === 'chat'
             ? 'These notes were updated from the chat so far and describe everyone as they are now.'
             : 'These notes come from the card: the baseline everyone started from.',
-        'Express them through action, choice, tone and subtext; never state the notes outright or list them as traits.',
-        'These notes are raw material for the voice the style section sets, never a replacement for it: the narration stays in that voice and nothing here is explained or analysed on the page.',
-        'The story so far outranks these notes. Wherever the chat has already changed someone (a relationship moved, a belief broke, they softened or hardened), keep the change and read the notes as the history underneath it.',
+        'A note for you, the author, not a script: nothing here is stated, listed, or analysed on the page. It shows only through what people do and say, in the voice the style section sets.',
+        'Where the chat has already changed someone, the chat wins; this is the history underneath.',
     ];
     if (soft) out.push('This chat has run long and the notes may be out of date: use them only for what people want and fear, and take how they act and talk from the chat itself.');
     const changes = profile.changes ?? [];
@@ -168,8 +167,8 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text }
         if (present.length) out.push('', kind === 'multi' ? '[The group] Only the parts this scene touches:' : '[People in this scene]', ...present.map(m => memberLine(m, soft)));
         if (absent.length) out.push('', `[Not in this scene] ${absent.map(m => m.name).join(', ')}. Bring them in only if the story does; if it does, keep them as written before.`);
     }
-    out.push('', 'Use only what this moment touches; most replies need little of it. These are tendencies, not rules: people may surprise, contradict themselves, act out of mood, or change when the story gives a reason.', `</${tag.split(' ')[0]}>`);
+    out.push('', 'Most replies touch little of this. People surprise themselves; let them.', `</${tag.split(' ')[0]}>`);
     return out.join('\n');
 }
 
-export const CAST_THINK_LINE = '\n- Insight: who in this scene wants what right now, and is anyone facing their own dilemma? Keep each voice distinct, as they are now in this story (what the chat has established beats the notes); if nothing presses, leave it out.';
+export const CAST_THINK_LINE = '\n- Insight note: only if this scene touches it, who wants what right now, each in their own voice, as they are now in this story; it never shows as analysis.';
