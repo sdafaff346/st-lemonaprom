@@ -106,8 +106,13 @@ export function getSettings() {
 /** Response length for a side call: the user's number when set, otherwise `auto`. */
 export function sideMaxTokens(auto = 2000) {
     const n = Number(getSettings().api_max_tokens);
-    return n > 0 ? n : auto;
+    // Thinking models (Gemini 3/4, o-series, Claude with thinking) spend the response length on
+    // thinking first; 2000 left them no room for the answer, which came back empty or cut off.
+    // The cap costs nothing unless it is used.
+    return n > 0 ? n : Math.max(auto, AUTO_SIDE_TOKENS);
 }
+
+export const AUTO_SIDE_TOKENS = 8192;
 
 /**
  * {{char}} and {{user}} only. SillyTavern's substituteParams also runs {{setvar}}, {{addvar}} and
@@ -216,6 +221,15 @@ export function extractJson(reply) {
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     const cut = '응답이 중간에 잘렸거나 형식이 깨졌어요. 서랍 🔌 보조 API의 응답 길이를 늘리고 다시 해 보세요.';
+    if (!cleaned) throw new Error('AI가 빈 답을 보냈어요. 생각(추론)하느라 응답 길이를 다 썼을 수 있어요. 서랍 🔌 보조 API의 응답 길이를 0(자동)으로 두거나 늘려 주세요.');
+    // A bare array ([{…}, …]) is accepted too
+    const as = cleaned.indexOf('[');
+    const ae = cleaned.lastIndexOf(']');
+    if (as !== -1 && ae > as && (start === -1 || as < start)) {
+        try {
+            return JSON.parse(cleaned.slice(as, ae + 1));
+        } catch { /* fall back to the object */ }
+    }
     if (start === -1 || end <= start) throw new Error(cut);
     try {
         return JSON.parse(cleaned.slice(start, end + 1));

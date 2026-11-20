@@ -419,6 +419,40 @@ function problemSentences(mes, scan) {
     return out;
 }
 
+/** Accepts the shapes models actually send: {fixes:[…]}, a bare array, i as a string, text under another key. */
+function readFixes(parsed) {
+    const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.fixes) ? parsed.fixes : Array.isArray(parsed?.sentences) ? parsed.sentences : [];
+    const out = new Map();
+    list.forEach((f, k) => {
+        const i = Number(f?.i ?? f?.index ?? f?.id ?? k + 1) - 1;
+        const text = String(f?.text ?? f?.fixed ?? f?.rewrite ?? f?.sentence ?? '').trim();
+        if (Number.isInteger(i) && i >= 0 && text) out.set(i, text);
+    });
+    return out;
+}
+
+/** One rewrite round over `text`; returns the new text and how many sentences changed. */
+async function fixRound(text, prev, retry) {
+    const scan = scanReply(text, prev);
+    const targets = problemSentences(text, scan);
+    if (!targets.length) return { text, applied: 0, targets: 0 };
+    const story = maskNonStory(text).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
+    const list = targets.map((t, i) => `${i + 1}. ${t.text}\n   problems: ${t.problems.join('; ')}`).join('\n');
+    const again = retry ? '\n\nThese sentences were already rewritten once and still break the rules. Change the flagged words to different, plain words this time; a derived form of a banned root is still banned.' : '';
+    const reply = await sideGenerate(fixSystemPrompt(getRules().raw, replyLanguage(story)), `<reply>\n${story}\n</reply>\n\n<sentences_to_fix>\n${list}\n</sentences_to_fix>${again}\n\nOutput the JSON object only.`);
+    const byIndex = readFixes(extractJson(reply));
+    let out = text;
+    let applied = 0;
+    for (let k = targets.length - 1; k >= 0; k--) {
+        const t = targets[k];
+        const next = byIndex.get(k);
+        if (!next || next === t.text || out.slice(t.start, t.end) !== t.text) continue;
+        out = out.slice(0, t.start) + next + out.slice(t.end);
+        applied++;
+    }
+    return { text: out, applied, targets: targets.length };
+}
+
 export async function fixMessage(mesId) {
     return guarded(`fix:${mesId}`, async () => {
         const c = ctx();
@@ -429,31 +463,27 @@ export async function fixMessage(mesId) {
             return 0;
         }
         const scan = scanMessage(mesId);
-        const targets = scan ? problemSentences(m.mes, scan) : [];
-        if (!targets.length) {
-            toast('info', '고칠 문장이 없어요.');
+        const first = scan ? problemSentences(m.mes, scan).length : 0;
+        if (!first) {
+            toast('info', scan?.issues.length ? '소유 표현은 표시만 하고 고치지 않아요. 고칠 문장이 없어요.' : '고칠 문장이 없어요.');
             return 0;
         }
         // The side call takes seconds, and the user may switch chats meanwhile (background-reply
         // extensions make that normal). Writing then would render and save into the wrong chat.
         const chatAtStart = c.getCurrentChatId?.();
         const mesAtStart = m.mes;
-        const pending = toast('info', `문장 ${targets.length}개 고치는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
+        const prev = previousReplyText(mesId);
+        const pending = toast('info', `문장 ${first}개 고치는 중…`, '레모나', { timeOut: 0, extendedTimeOut: 0 });
         try {
-            const story = maskNonStory(m.mes).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
-            const list = targets.map((t, i) => `${i + 1}. ${t.text}\n   problems: ${t.problems.join('; ')}`).join('\n');
-            const reply = await sideGenerate(fixSystemPrompt(getRules().raw, replyLanguage(story)), `<reply>\n${story}\n</reply>\n\n<sentences_to_fix>\n${list}\n</sentences_to_fix>\n\nOutput the JSON object only.`);
-            const parsed = extractJson(reply);
-            const fixes = Array.isArray(parsed?.fixes) ? parsed.fixes : [];
+            // A rewrite sometimes keeps the banned root in another form; one more round on just those
             let mes = m.mes;
             let applied = 0;
-            const byIndex = new Map(fixes.map(f => [Number(f?.i) - 1, String(f?.text ?? '').trim()]));
-            for (let k = targets.length - 1; k >= 0; k--) {
-                const t = targets[k];
-                const next = byIndex.get(k);
-                if (!next || next === t.text || mes.slice(t.start, t.end) !== t.text) continue;
-                mes = mes.slice(0, t.start) + next + mes.slice(t.end);
-                applied++;
+            for (let round = 0; round < 2; round++) {
+                const r = await fixRound(mes, prev, round > 0);
+                mes = r.text;
+                applied += r.applied;
+                if (!r.targets) break;
+                if (c.getCurrentChatId?.() !== chatAtStart || m.mes !== mesAtStart) break;
             }
             if (chatAtStart !== undefined && c.getCurrentChatId?.() !== chatAtStart) {
                 toast('warning', '고치는 동안 다른 채팅으로 옮겨서 적용하지 않았어요. 그 채팅으로 돌아가서 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
@@ -463,8 +493,8 @@ export async function fixMessage(mesId) {
                 toast('warning', '고치는 동안 메시지가 바뀌어서 적용하지 않았어요. 다시 눌러 주세요.', '레모나', { timeOut: 10000 });
                 return 0;
             }
-            if (!applied) {
-                toast('warning', 'AI가 고친 문장을 돌려주지 않았어요. 다시 시도해 주세요.');
+            if (!applied || mes === m.mes) {
+                toast('warning', 'AI가 문장을 그대로 돌려줬어요. 다시 눌러 보거나, 보조 API를 다른 모델로 바꿔 보세요.', '레모나', { timeOut: 10000 });
                 return 0;
             }
             const owned = displayOwnedByOther(mesId);
@@ -485,7 +515,7 @@ export async function fixMessage(mesId) {
             await c.saveChat();
             await c.eventSource.emit(c.event_types.MESSAGE_EDITED, mesId);
             const left = fixableIssues(scanMessage(mesId)?.issues ?? []).length;
-            toast(left ? 'warning' : 'success', left ? `${applied}문장을 고쳤어요. 아직 ${left}개가 남았어요.` : `${applied}문장을 고쳤어요.`);
+            toast(left ? 'warning' : 'success', left ? `고쳤어요. 아직 ${left}개가 남았어요. 한 번 더 누르면 남은 것만 고쳐요.` : `${first}문장을 고쳤어요.`);
             if (owned) toast('info', '다른 확장이 이 메시지의 화면 표시를 맡고 있어요(번역 등). 고친 내용은 저장됐지만, 화면에 보이려면 그 확장을 다시 실행해 주세요.', '레모나', { timeOut: 12000 });
             return applied;
         } finally {

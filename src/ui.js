@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 
 // ================================================================ small building blocks
 
@@ -875,7 +875,7 @@ function settingsHtml() {
         '분석 · 고치기 · 버릇 찾기용',
         `<p class="lmc-hint">연결 프로필을 고르면 본 채팅과 다른(싼) 모델로 돌릴 수 있어요.</p>
         ${selectRow('lmc_api_profile', '연결 프로필')}
-        ${numberRow('lmc_api_tokens', '응답 길이 (토큰)', 0, 16000, 100, '0 = 자동 (기본 2000, 로어북·다인봇이면 더 길게)')}
+        ${numberRow('lmc_api_tokens', '응답 길이 (토큰)', 0, 16000, 100, '0 = 자동 (8192, 생각하는 모델도 넉넉하게)')}
         ${selectRow('lmc_lang', '분석 결과 언어', '<option value="preset">프리셋 서술 언어에 맞춤</option><option value="ko">한국어</option><option value="en">영어</option><option value="card">카드와 같은 언어</option>')}`,
     );
 
