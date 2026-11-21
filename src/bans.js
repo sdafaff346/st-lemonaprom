@@ -62,15 +62,44 @@ export function stemOf(word) {
  */
 export function parseBanList(text) {
     const lines = String(text ?? '').split('\n').map(l => l.trim());
-    const res = { roots: [], exact: [], slang: [], possessive: [], restrained: [], raw: String(text ?? '') };
+    const res = { roots: [], exact: [], slang: [], possessive: [], restrained: [], notes: {}, raw: String(text ?? '') };
+    const absRoots = [];
+    const absExact = [];
     let inRestrained = false;
+    let inAbsolute = false;
+    let absHead = '';
     for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
         if (/^#\s*RESTRAINED/i.test(l)) {
             inRestrained = true;
             continue;
         }
-        if (/^#/.test(l)) inRestrained = false;
+        // v8.0.2: "# ABSOLUTE BANS" with one "## word" block per ban
+        if (/^#\s*ABSOLUTE/i.test(l)) {
+            inAbsolute = true;
+            inRestrained = false;
+            continue;
+        }
+        if (inAbsolute && /^##\s+/.test(l)) {
+            absHead = l.replace(/^##\s+/, '').trim();
+            continue;
+        }
+        if (/^#(?!#)/.test(l)) {
+            inRestrained = false;
+            inAbsolute = false;
+        }
+        if (inAbsolute && absHead) {
+            const forms = l.match(/covers every form:\s*(.+)$/i)?.[1];
+            const spellings = l.match(/^-\s*Never write\s+(.+?)(?:,?\s+or any other spelling|\s+in narration|$)/i)?.[1];
+            const swaps = /do not swap in/i.test(l) ? l.match(/\(([^)]*,[^)]*)\)/)?.[1] : null;
+            if (forms) {
+                absRoots.push(absHead.includes(' ') ? stemOf(absHead) : absHead);
+                for (const f of splitList(forms)) absRoots.push(stemOf(f.replace(/(?<=..)다$/, '')));
+            }
+            if (spellings) for (const w of splitList(spellings.replace(/\bor\s+/g, ''))) absExact.push([w, '절대 금지']);
+            if (swaps) for (const w of splitList(swaps).filter(x => /^[가-힣]+$/.test(x))) absExact.push([w, `「${absHead}」 대신 쓰는 말도 금지`]);
+            continue;
+        }
         if (/^A\./.test(l)) {
             const tail = afterColon(l);
             const listLine = tail.includes(',') ? tail : lines.slice(i + 1).find(x => x.includes(','));
@@ -82,6 +111,12 @@ export function parseBanList(text) {
             res.restrained = [...new Set(splitList(l).map(stemOf))];
             inRestrained = false;
         }
+    }
+    // A root that another root already covers (서늘 ⊃ 서늘하) adds nothing; 서느렇다 still adds 서느렇
+    for (const r of absRoots) if (r && !res.roots.some(x => r.startsWith(x))) res.roots.push(r);
+    for (const [w, note] of absExact) {
+        if (!res.exact.includes(w)) res.exact.push(w);
+        res.notes[w] = note;
     }
     return res;
 }
@@ -163,6 +198,7 @@ export function sentenceRanges(text) {
     return out;
 }
 
+const EXCLAIM_FREE = 2; // more than this many -라니/-다니 endings in one reply counts as overuse
 const EXCLAIM_RE = /(?:라니|다니|하고는)[.!?…]*["'”’]?$/;
 const CONTRAST_RE = /[가-힣]+(?:이|가)\s?아니라[,\s]/;
 const NOT_BUT_RE = /(?<!\b(?:do|does|did|could|would|should|will|can|may|might|must|shall)\s)\bnot\s+(?:just\s+|only\s+|merely\s+|simply\s+)?(?:[\w'-]+\s+){0,4}?[\w'-]+,?\s+but\s+(?!(?:i|you|he|she|it|we|they|there|then|the|this|that|his|her|their|my|your|our)\b)/i;
@@ -192,13 +228,12 @@ export function scanReply(mes, prevMes = '') {
             if (!(over || repeat || consecutive)) continue;
             h.note = consecutive ? '직전 답변에도 씀' : '한 답변에 1개까지';
         }
+        if (!h.note && rules.notes?.[h.word]) h.note = rules.notes[h.word];
         issues.push({ ...h, text: mes.slice(h.index, h.index + h.length) });
     }
 
     // structure checks, per sentence
-    const prevMasked = prevMes ? maskNonStory(prevMes) : '';
-    const prevExclaim = sentenceRanges(prevMasked).some(r => EXCLAIM_RE.test(prevMasked.slice(r.start, r.end)));
-    let exclaimCount = 0;
+    const exclaims = [];
     let negRun = []; // consecutive English negated sentences sharing an opening word
     const flushNegRun = () => {
         if (negRun.length >= 2) {
@@ -228,11 +263,17 @@ export function scanReply(mes, prevMes = '') {
             flushNegRun();
         }
         if (EXCLAIM_RE.test(s)) {
-            exclaimCount++;
-            if (exclaimCount > 1 || prevExclaim) issues.push({ type: 'structure', word: '-라니/-다니/-하고는', note: prevExclaim && exclaimCount === 1 ? '직전 답변에도 씀' : '한 답변에 1번까지', index: r.start, length: r.end - r.start, text: mes.slice(r.start, r.end) });
+            exclaims.push(r);
         }
     }
     flushNegRun();
+    // -라니 / -다니 is a normal Korean exclamation; only flag it when a reply leans on it.
+    // The first EXCLAIM_FREE stay, the rest are rewritten.
+    if (exclaims.length > EXCLAIM_FREE) {
+        for (const r of exclaims.slice(EXCLAIM_FREE)) {
+            issues.push({ type: 'structure', word: '-라니/-다니/-하고는', note: `한 답변에 ${exclaims.length}번 (남발)`, index: r.start, length: r.end - r.start, text: mes.slice(r.start, r.end) });
+        }
+    }
     issues.sort((a, b) => a.index - b.index);
     return { issues, sentences };
 }
