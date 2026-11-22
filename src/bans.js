@@ -140,6 +140,53 @@ function stripParticle(tok) {
  * Word-level hits in a plain string.
  * @returns {{type:'root'|'exact'|'slang'|'possessive'|'restrained', word:string, index:number, length:number}[]}
  */
+// A possessive is only worth flagging when it claims a person: "넌 내 거야", "그녀는 나의 것이다", "You're mine".
+// "내 거실", "그건 내 거야" (an object) and "a friend of mine" are left alone.
+const KO_PERSON = /(?:^|[^가-힣])(?:너|넌|널|네가|니가|너는|너를|당신|당신은|당신을|그대|그녀|그녀는|그녀를|그는|그를|이 여자|이 남자|그 여자|그 남자|이 사람|그 사람)(?![가-힣]{2})/;
+const KO_THING = /(?:^|[^가-힣])(?:그건|그거|이건|이거|저건|저거|그것|이것|저것)(?:은|도|만|까지)?(?![가-힣])/;
+// What may follow the phrase: nothing, or an ending (야, 다, 이야, 이다, 라고, 잖아, 지, 니까, 예요, 이에요, 요, 란, 인데, 로, 으로, 이니까, 이었, 였…)
+const KO_AFTER = /^(?:$|[^가-힣]|(?:이)?(?:야|다|라|란|잖|지|니|예|에요|요|었|였|고|든|던|면|인|일|로|으로|라는|란다|거든|구나)|이)/;
+const EN_PERSON = /\b(?:you|you're|youre|she|she's|he|he's|her|him)\b/i;
+
+function sentenceAround(text, i, len) {
+    const stop = /[.!?…\n"“”「」『』]/;
+    let a = i;
+    while (a > 0 && !stop.test(text[a - 1])) a--;
+    let b = i + len;
+    while (b < text.length && !stop.test(text[b])) b++;
+    return { before: text.slice(a, i), after: text.slice(i + len, b) };
+}
+
+function possessiveHits(text, list) {
+    const out = [];
+    let userName = '';
+    try {
+        userName = String(ctx().name1 ?? '').trim();
+    } catch { /* no context outside SillyTavern */ }
+    for (const w of list ?? []) {
+        const english = /^[a-z ]+$/i.test(w);
+        const re = new RegExp(english ? `\\b${w.replace(/\s+/g, '\\s+')}\\b` : w.replace(/\s+/g, '\\s*'), english ? 'gi' : 'g');
+        for (const m of text.matchAll(re)) {
+            const at = m.index;
+            const { before, after } = sentenceAround(text, at, m[0].length);
+            const prev = text[at - 1] ?? '';
+            if (english) {
+                // "mine" claims someone only at the end of its clause with a person in it; "of mine" is ordinary
+                if (/\bof\s+$/i.test(before) || !/^\s*(?:[,.!?…"”]|$|\s+(?:now|forever|alone|and)\b)/i.test(after)) continue;
+                if (!EN_PERSON.test(before) && !(userName && before.includes(userName))) continue;
+            } else {
+                if (/[가-힣]/.test(prev)) continue; // 내내 거실: the phrase starts inside another word
+                if (!KO_AFTER.test(after)) continue; // 내 거실, 내 것들
+                const near = before.slice(-24);
+                if (KO_THING.test(near)) continue;
+                if (!KO_PERSON.test(near) && !(userName && near.includes(userName))) continue;
+            }
+            out.push({ type: 'possessive', word: w, index: at, length: m[0].length });
+        }
+    }
+    return out;
+}
+
 export function findWords(text, rules = getRules()) {
     const hits = [];
     const lower = text.toLowerCase();
@@ -155,11 +202,6 @@ export function findWords(text, rules = getRules()) {
         const slang = rules.slang.find(w => /^[\p{L}\p{N}]+$/u.test(w) && (tok === w || (!EXACT_ONLY.has(w) && stripParticle(tok) === w)));
         if (slang) {
             hits.push({ type: 'slang', word: slang, index: at, length: tok.length });
-            continue;
-        }
-        const pos = rules.possessive.find(w => /^[a-z]+$/i.test(w) && tok.toLowerCase() === w.toLowerCase());
-        if (pos) {
-            hits.push({ type: 'possessive', word: pos, index: at, length: tok.length });
             continue;
         }
         // restrained words are ordinary vocabulary, so the stem must be followed by an ending, not another noun (고등 ≠ 고등학교)
@@ -180,7 +222,9 @@ export function findWords(text, rules = getRules()) {
     };
     substr(rules.exact, 'exact', () => true);
     substr(rules.slang, 'slang', w => !/^[\p{L}\p{N}]+$/u.test(w));
-    substr(rules.possessive, 'possessive', w => !/^[a-z]+$/i.test(w));
+    for (const h of possessiveHits(text, rules.possessive)) {
+        if (!hits.some(x => h.index < x.index + x.length && x.index < h.index + h.length)) hits.push(h);
+    }
     return hits.sort((a, b) => a.index - b.index);
 }
 
