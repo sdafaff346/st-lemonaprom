@@ -129,6 +129,12 @@ export function detectLemona() {
     return state.lemona;
 }
 
+/** 🔧 캐해 리셋 (v8.0.5): a tool entry that pulls a drifted character back to the card. */
+export function characterResetOn() {
+    const p = settingsObj()?.prompts?.find(x => /캐해\s*리셋/.test(x?.name ?? ''));
+    return !!p && isEnabled(p.identifier);
+}
+
 function isEnabled(id) {
     return !!orderList()?.find(e => e.identifier === id)?.enabled;
 }
@@ -229,6 +235,7 @@ export function healthCheck() {
     const byWord = w => optional.find(o => o.name.includes(w));
     const messenger = byWord('메신저');
     const status = byWord('상태창');
+    if (characterResetOn()) out.push({ level: 'info', text: '🔧 캐해 리셋이 켜져 있어요. 캐릭터가 돌아오면 다시 꺼 주세요. 켜 둔 동안 캐해 메모는 "채팅이 우선" 대신 카드 쪽으로 맞춰 넣어요.' });
     if (messenger?.enabled && status?.enabled) out.push({ level: 'warn', text: '메신저 모드와 상태창이 같이 켜져 있어요. 메신저 모드에서는 상태창을 꺼 주세요.' });
 
     // Argon / Carbon compatibility: alternatives to each other, each for its own Gemini 4 variant
@@ -362,9 +369,13 @@ export function snapshotToggles({ withModel = false } = {}) {
     const skip = withModel ? new Set() : modelToggleIds();
     const snap = {};
     for (const g of groups) for (const o of g.options) snap[o.id] = o.enabled;
-    for (const o of optional) if (!skip.has(o.id)) snap[o.id] = o.enabled;
+    // Short-lived tools (🧹 반복 끊기, 🔧 캐해 리셋) are switched on for a few replies and off again;
+    // a set or baseline that remembered them would keep turning them back on or off behind the user
+    for (const o of optional) if (!skip.has(o.id) && !TEMP_TOOL_RE.test(o.name)) snap[o.id] = o.enabled;
     return snap;
 }
+
+const TEMP_TOOL_RE = /반복\s*끊기|캐해\s*리셋/;
 
 /** The open character's saved set: { preset, ids } (preset is '' for sets saved before v1.8.0). */
 export function savedSet() {

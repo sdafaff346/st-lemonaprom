@@ -165,7 +165,8 @@ function possessiveHits(text, list) {
     } catch { /* no context outside SillyTavern */ }
     for (const w of list ?? []) {
         const english = /^[a-z ]+$/i.test(w);
-        const re = new RegExp(english ? `\\b${w.replace(/\s+/g, '\\s+')}\\b` : w.replace(/\s+/g, '\\s*'), english ? 'gi' : 'g');
+        const parts = w.trim().split(/\s+/).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const re = new RegExp(english ? `\\b${parts.join('\\s+')}\\b` : parts.join('\\s*'), english ? 'gi' : 'g');
         for (const m of text.matchAll(re)) {
             const at = m.index;
             const { before, after } = sentenceAround(text, at, m[0].length);
@@ -564,7 +565,15 @@ export async function fixMessage(mesId) {
             let mes = m.mes;
             let applied = 0;
             for (let round = 0; round < 2; round++) {
-                const r = await fixRound(mes, prev, round > 0);
+                let r;
+                try {
+                    r = await fixRound(mes, prev, round > 0);
+                } catch (e) {
+                    // The retry is a bonus: keep what the first round fixed
+                    if (round === 0 || e?.name === 'CancelledError') throw e;
+                    console.warn(LOG, 'second fix round failed', e);
+                    break;
+                }
                 mes = r.text;
                 applied += r.applied;
                 if (!r.targets) break;

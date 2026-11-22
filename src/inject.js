@@ -4,7 +4,7 @@
 import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, safeSub, state } from './core.js';
 import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, thinkLineFor } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
-import { detectLemona, isActive, modelToggles } from './preset.js';
+import { characterResetOn, detectLemona, isActive, modelToggles } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
 
 const KEYS = Object.freeze({
@@ -26,12 +26,18 @@ function lemonaChatCompletion() {
 }
 
 /** Profile for the prompt plus how to phrase it: chat version, card version, or card version softened for a long chat. */
+/** What the active Lemona preset switches on that changes how the note reads (🔶 Carbon, 🔧 캐해 리셋). */
+export function presetModes() {
+    const lemona = detectLemona();
+    return { carbon: lemona && carbonOn(), reset: lemona && characterResetOn() };
+}
+
 export function insightForPrompt() {
     const s = getSettings();
     if (!s.insight_module || !s.insight_enabled || !currentCharacter()) return null;
     const active = pickProfile();
     if (!active) return null;
-    return { profile: active.profile, opts: { source: active.source, soft: !!s.insight_soft_long && isLongChatOnCard(active, s) } };
+    return { profile: active.profile, opts: { source: active.source, soft: !!s.insight_soft_long && isLongChatOnCard(active, s), ...presetModes() } };
 }
 
 export function activeProfile() {

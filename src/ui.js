@@ -5,7 +5,7 @@
 import { listProfiles } from './api.js';
 import { decorateRecent, fixableIssues, fixMessage, scanMessage, TYPE_LABEL, undoFix } from './bans.js';
 import { chatIdentity, clamp, ctx, currentCharacter, defaultSettings, ensureFullCharacter, esc, getSettings, guarded, LIMITS, readCharData, requireCharacter, safeSub, saveSettings, state, toast } from './core.js';
-import { refreshInjection } from './inject.js';
+import { presetModes, refreshInjection } from './inject.js';
 import { syncModelToggles } from './autotoggle.js';
 import { emptyMember, KIND_LABELS, KIND_SHORT, KINDS, MEMBER_FIELDS } from './cast.js';
 import { analyzeChatEvolution, analyzeCurrentCharacter, buildInsightPrompt, deleteChatProfile, deleteProfile, emptyPair, emptyRelation, isLongChatOnCard, LAYER_FIELDS, loadChatProfile, loadProfile, normalizeProfile, saveChatProfile, saveProfile, storyLength } from './insight.js';
@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.9.3';
+const VERSION = '1.9.4';
 
 // ================================================================ small building blocks
 
@@ -300,7 +300,7 @@ function bindEditor(root, draft, mode = 'card') {
         if (!pre) return;
         const p = normalizeProfile(draft);
         const soft = mode === 'card' && !!getSettings().insight_soft_long && isLongChatOnCard({ source: 'card' });
-        pre.textContent = safeSub(buildInsightPrompt(p, readMvuState(p), { source: mode, soft }));
+        pre.textContent = safeSub(buildInsightPrompt(p, readMvuState(p), { source: mode, soft, ...presetModes() }));
     };
     const updateRecDiff = () => {
         const el = q('[data-rec-diff]');

@@ -428,8 +428,8 @@ function leanText(a, b, lean) {
  * @param {{ source?: 'card'|'chat', soft?: boolean }} [opts]
  *   source: where the reading came from. soft: card reading in a long chat, so keep only the deep motives.
  */
-export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text } = {}) {
-    if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text });
+export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text, carbon = false, reset = false } = {}) {
+    if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text, carbon, reset });
     const l = profile.layers;
     // A light author-side note: v8.0's realism and 🔍 steps already do the character work, this only
     // hands them the specifics of this one person. Costs and fears stay out of the page entirely.
@@ -439,16 +439,21 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
             ? 'A short note for you, the author, on what moves {{char}} as they are now in this story. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.'
             : 'A short note for you, the author, on what moves {{char}}, read from the card. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.',
         'It is not a conscience and not a script: none of it is stated, recited, listed, or analysed on the page, and none of it turns into guilt, moral weighing, or self-explanation. It shows only through what {{char}} does and says, in the voice the style section sets.',
-        'Where the chat has already changed {{char}}, the chat wins; this is the history underneath.',
+        // 🔧 캐해 리셋 (v8.0.5) pulls {{char}} back to the card; "the chat wins" would pull the other way
+        reset
+            ? 'The character reset is on: what has happened and what has grown stays, but how {{char}} shows it comes back to the card. Use this note for what moves them, never for the drifted manner of recent replies.'
+            : 'Where the chat has already changed {{char}}, the chat wins; this is the history underneath.',
     ];
-    if (soft) out.push('The chat has run long: take how {{char}} acts and talks from the chat itself, and use this only for what they want underneath.');
+    // 🔶 Carbon (v8.0.5) plays traits at full volume and adds no hidden wound or decency the card lacks
+    if (carbon) out.push('These are how {{char}} is, not reasons that explain, soften, or excuse them: play the traits at full volume.');
+    if (soft && !reset) out.push('The chat has run long: take how {{char}} acts and talks from the chat itself, and use this only for what they want underneath.');
     const changes = profile.changes ?? [];
     if (changes.length) out.push('', 'Changed in this story (keep):', ...changes.map(t => `- ${t}`));
     const lines = [
         l.desire && `- Wants: ${l.desire}`,
         !soft && l.surface && `- Shows others: ${l.surface}`,
         l.self_deception && `- Tells themselves: ${l.self_deception}`,
-        l.fear && `- Underneath, rarely touched: ${l.fear}`,
+        !carbon && l.fear && `- Underneath, rarely touched: ${l.fear}`,
     ].filter(Boolean);
     if (mvuState && lines.length) lines.push(`- Mask right now: ${crackBand(mvuState.가면균열)}.`);
     profile.pairs.forEach((p, i) => {

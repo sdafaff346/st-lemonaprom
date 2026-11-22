@@ -134,7 +134,7 @@ function memberLine(m, soft) {
  * @param {any} profile normalized profile with kind multi|sim|rpg
  * @param {{ source?: 'card'|'chat', soft?: boolean, text?: string }} [opts]
  */
-export function buildCastPrompt(profile, { source = 'card', soft = false, text } = {}) {
+export function buildCastPrompt(profile, { source = 'card', soft = false, text, carbon = false, reset = false } = {}) {
     const kind = normalizeKind(profile.kind);
     const tag = kind === 'multi' ? 'character_insight for="cast"' : 'world_insight';
     const out = [
@@ -144,9 +144,12 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text }
             ? 'These notes were updated from the chat so far and describe everyone as they are now.'
             : 'These notes come from the card: the baseline everyone started from.',
         'A note for you, the author, not a script: nothing here is stated, listed, or analysed on the page. It shows only through what people do and say, in the voice the style section sets.',
-        'Where the chat has already changed someone, the chat wins; this is the history underneath.',
+        reset
+            ? 'The character reset is on: what has happened stays, but how each person shows it comes back to the card.'
+            : 'Where the chat has already changed someone, the chat wins; this is the history underneath.',
+        ...(carbon ? ['These are how people are, not reasons that explain, soften, or excuse them.'] : []),
     ];
-    if (soft) out.push('This chat has run long and the notes may be out of date: use them only for what people want and fear, and take how they act and talk from the chat itself.');
+    if (soft && !reset) out.push('This chat has run long and the notes may be out of date: use them only for what people want and fear, and take how they act and talk from the chat itself.');
     const changes = profile.changes ?? [];
     if (changes.length) out.push('', '[How things have changed in this story] Earned through the chat; keep them:', ...changes.map(t => `- ${t}`));
     if (kind !== 'multi') {
