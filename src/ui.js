@@ -13,7 +13,7 @@ import { readMvuState } from './mvu.js';
 import { applyCharacterToggles, clearTogglesForCharacter, describeChanges, detectLemona, FLAG_LABELS, healthCheck, inactiveReason, isActive, modelToggleIds, readToggles, recommendationChanges, saveTogglesForCharacter, selectInGroup, setToggles } from './preset.js';
 import { analyzeHabits, detectRepeats, getHabits, setHabits } from './repeat.js';
 
-const VERSION = '1.9.4';
+const VERSION = '1.9.5';
 
 // ================================================================ small building blocks
 
@@ -78,7 +78,7 @@ function leanLabel(p) {
     return '팽팽해요';
 }
 
-const BOT_LABEL = { original: '1차봇 오리지널', motif: '1차봇 모티브', korean: '2차봇 한국 장르', japanese: '2차봇 일본 애니·만화', western: '2차봇 서양 장르' };
+const BOT_LABEL = { original: '1차봇 오리지널', motif: '1차봇 모티브', korean: '2차봇 한국 장르', japanese: '2차봇 일본 애니·만화·게임', western: '2차봇 서양 장르' };
 const MOOD_LABEL = { none: '분위기 없음', slow: '썸·밀당', comedy: '일상 코미디', tense: '긴장·스릴러', work: '사건·일 중심' };
 
 function recommendSummary(rec) {

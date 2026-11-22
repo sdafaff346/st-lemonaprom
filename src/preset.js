@@ -129,6 +129,12 @@ export function detectLemona() {
     return state.lemona;
 }
 
+/** A 📺 2차봇 (fan-work) entry is the one picked in the bot-type group. */
+export function fandomOn() {
+    const g = readToggles().groups.find(x => x.label === '봇 유형');
+    return !!g?.options.some(o => o.enabled && /2차봇/.test(promptById(o.id)?.name ?? ''));
+}
+
 /** 🔧 캐해 리셋 (v8.0.5): a tool entry that pulls a drifted character back to the card. */
 export function characterResetOn() {
     const p = settingsObj()?.prompts?.find(x => /캐해\s*리셋/.test(x?.name ?? ''));

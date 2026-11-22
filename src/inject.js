@@ -4,7 +4,7 @@
 import { ctx, currentCharacter, getSettings, PROMPT_ROLE, PROMPT_TYPE, safeSub, state } from './core.js';
 import { activeProfile as pickProfile, buildInsightPrompt, isLongChatOnCard, thinkLineFor } from './insight.js';
 import { buildMvuRulesPrompt, mvuActive, MVU_OUTPUT_FORMAT, readMvuState } from './mvu.js';
-import { characterResetOn, detectLemona, isActive, modelToggles } from './preset.js';
+import { characterResetOn, detectLemona, fandomOn, isActive, modelToggles } from './preset.js';
 import { buildBreakerNote, detectRepeats, getHabits } from './repeat.js';
 
 const KEYS = Object.freeze({
@@ -29,7 +29,7 @@ function lemonaChatCompletion() {
 /** What the active Lemona preset switches on that changes how the note reads (🔶 Carbon, 🔧 캐해 리셋). */
 export function presetModes() {
     const lemona = detectLemona();
-    return { carbon: lemona && carbonOn(), reset: lemona && characterResetOn() };
+    return { carbon: lemona && carbonOn(), reset: lemona && characterResetOn(), fandom: lemona && fandomOn() };
 }
 
 export function insightForPrompt() {

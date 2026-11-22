@@ -240,6 +240,7 @@ function analysisSystemPrompt(settings, forcedKind = null) {
         '- Connect motives to causes found in the card when the card gives one. If the card is silent, infer the most plausible cause and keep it modest; do not invent major backstory events.',
         '- Prefer tension: the inner layer should explain or contradict the surface layer, not repeat it.',
         '- Keep the character at the intensity the card writes. Do not soften edges (rudeness, selfishness, cruelty) or add kindness the card does not give.',
+        "- A fan-work character (a character from an existing anime, manga, game, novel, drama...) is the canon character: write the items from canon's version as the card sets it, when you know canon well. The card wins only where it clearly rewrites canon; a short or generic card description (\"kind\", \"cold\") is a summary of canon. Never fill gaps with the genre's stock archetype, and if you do not know canon well, stay with the card.",
         '- A <lorebook> holds world-info entries tied to this character. Treat it as part of the card: use it for past events, relationships and world rules that explain the motives. The card wins where the two disagree. Do not summarise the lorebook or copy world facts into the output; use it only to ground the inner logic.',
         '',
         kindSection(forcedKind),
@@ -261,7 +262,7 @@ function analysisSystemPrompt(settings, forcedKind = null) {
         '   Leave the array empty when the card and lorebook name nobody like that.',
         '4. base_crack: integer 0-100, how much of the inner layer normally leaks through the surface at the start of a story (0 = perfectly masked, 100 = wears their heart on their sleeve).',
         '5. recommend — which writing-preset switches fit this card:',
-        '   - bot_type: "original" (the card\'s own original character), "motif" (inspired by an existing work but not that canon), "korean" / "japanese" / "western" (a fan-work character from an existing Korean / Japanese anime-manga / Western work).',
+        '   - bot_type: "original" (the card\'s own original character), "motif" (inspired by an existing work but not that canon), "korean" / "japanese" (anime, manga, or game) / "western" (a fan-work character from an existing Korean / Japanese anime-manga / Western work).',
         '   - canon: the name of the original work for a fan-work character, otherwise "".',
         '   - mood: "none", "slow" (slow-burn flirting), "comedy" (everyday comedy), "tense" (thriller tension) or "work" (case- or job-driven); "none" unless the card clearly sets one.',
         '   - harsh: true if being rude, cruel, selfish or contemptuous is core to them. gentle: true if gentle, courteous kindness is core to them. Never both.',
@@ -428,8 +429,8 @@ function leanText(a, b, lean) {
  * @param {{ source?: 'card'|'chat', soft?: boolean }} [opts]
  *   source: where the reading came from. soft: card reading in a long chat, so keep only the deep motives.
  */
-export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text, carbon = false, reset = false } = {}) {
-    if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text, carbon, reset });
+export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = false, text, carbon = false, reset = false, fandom = false } = {}) {
+    if (isCastKind(profile.kind)) return buildCastPrompt(profile, { source, soft, text, carbon, reset, fandom });
     const l = profile.layers;
     // A light author-side note: v8.0's realism and 🔍 steps already do the character work, this only
     // hands them the specifics of this one person. Costs and fears stay out of the page entirely.
@@ -446,6 +447,8 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
     ];
     // 🔶 Carbon (v8.0.5) plays traits at full volume and adds no hidden wound or decency the card lacks
     if (carbon) out.push('These are how {{char}} is, not reasons that explain, soften, or excuse them: play the traits at full volume.');
+    // 📺 2차봇 (v8.1): canon sets who the character is; a short note must not flatten them
+    if (fandom) out.push("{{char}} comes from a canon, and canon sets who they are. Where this note is shorter or plainer than canon, it is a summary of canon, not a replacement: play canon's version at full strength, never the genre's stock one.");
     if (soft && !reset) out.push('The chat has run long: take how {{char}} acts and talks from the chat itself, and use this only for what they want underneath.');
     const changes = profile.changes ?? [];
     if (changes.length) out.push('', 'Changed in this story (keep):', ...changes.map(t => `- ${t}`));

@@ -134,7 +134,7 @@ function memberLine(m, soft) {
  * @param {any} profile normalized profile with kind multi|sim|rpg
  * @param {{ source?: 'card'|'chat', soft?: boolean, text?: string }} [opts]
  */
-export function buildCastPrompt(profile, { source = 'card', soft = false, text, carbon = false, reset = false } = {}) {
+export function buildCastPrompt(profile, { source = 'card', soft = false, text, carbon = false, reset = false, fandom = false } = {}) {
     const kind = normalizeKind(profile.kind);
     const tag = kind === 'multi' ? 'character_insight for="cast"' : 'world_insight';
     const out = [
@@ -148,6 +148,7 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text, 
             ? 'The character reset is on: what has happened stays, but how each person shows it comes back to the card.'
             : 'Where the chat has already changed someone, the chat wins; this is the history underneath.',
         ...(carbon ? ['These are how people are, not reasons that explain, soften, or excuse them.'] : []),
+        ...(fandom ? ["They come from a canon, and canon sets who they are; where these notes are plainer than canon, play canon's version."] : []),
     ];
     if (soft && !reset) out.push('This chat has run long and the notes may be out of date: use them only for what people want and fear, and take how they act and talk from the chat itself.');
     const changes = profile.changes ?? [];
