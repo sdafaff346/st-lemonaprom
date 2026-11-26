@@ -1,5 +1,5 @@
 /**
- * 레모나 도우미 (Lemona Companion) — SillyTavern extension for the 레모나 preset (v8.1 base).
+ * 레모나 도우미 (Lemona Companion) — SillyTavern extension for the 레모나 preset (v8.3 base).
  *
  * 1. 캐해: two-layer reading + colliding value pairs, spliced after </realism> and into <thinkingProcess>
  * 2. MVU: stat_data.캐해 dynamic layer (mask crack, per-pair lean)

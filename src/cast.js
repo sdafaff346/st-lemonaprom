@@ -171,7 +171,7 @@ export function buildCastPrompt(profile, { source = 'card', soft = false, text, 
         if (present.length) out.push('', kind === 'multi' ? '[The group] Only the parts this scene touches:' : '[People in this scene]', ...present.map(m => memberLine(m, soft)));
         if (absent.length) out.push('', `[Not in this scene] ${absent.map(m => m.name).join(', ')}. Bring them in only if the story does; if it does, keep them as written before.`);
     }
-    out.push('', 'Most replies touch little of this. People surprise themselves; let them.', `</${tag.split(' ')[0]}>`);
+    out.push('', 'Most replies touch little of this; the rest stays offstage until a moment calls for it. People surprise themselves; let them.', `</${tag.split(' ')[0]}>`);
     return out.join('\n');
 }
 

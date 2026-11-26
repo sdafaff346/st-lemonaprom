@@ -218,7 +218,7 @@ function kindSection(forcedKind) {
         '   - name: as the card writes it. aliases: other names, titles or nicknames the story uses for them (0-4).',
         '   - role: who they are in the story, in a few words.',
         '   - surface: how they come across to others, as behaviour.',
-        '   - inner: what they actually want and what they fear underneath; it should explain or contradict the surface.',
+        '   - inner: what they actually want underneath, and what they fear only when the card or lorebook shows it; it should explain or contradict the surface.',
         '   - voice: what makes their speech or habits recognisably theirs, so they do not sound like the others.',
         '   - pair: their own two colliding values {"a","b","lean"} (lean 0-100 toward a), or null.',
         '   Every member must differ from the others in want and voice. Never include {{user}}.',
@@ -237,7 +237,7 @@ function analysisSystemPrompt(settings, forcedKind = null) {
         'Principles:',
         '- Do NOT use personality-type labels (MBTI, enneagram, zodiac, "tsundere", etc.) or bare adjectives ("cold", "kind").',
         '- Write each item as an observable behaviour or a concrete motive, e.g. "Calls out anyone who cuts in line, even strangers" instead of "values fairness".',
-        '- Connect motives to causes found in the card when the card gives one. If the card is silent, infer the most plausible cause and keep it modest; do not invent major backstory events.',
+        '- Use a cause only when the card or lorebook gives one. If the card is silent, leave the cause out: do not add a wound, a soft spot, a hidden decency, or a reason the card does not give. Tags and archetypes on the card are how the character acts, not symptoms to explain.',
         '- Prefer tension: the inner layer should explain or contradict the surface layer, not repeat it.',
         '- Keep the character at the intensity the card writes. Do not soften edges (rudeness, selfishness, cruelty) or add kindness the card does not give.',
         "- A fan-work character (a character from an existing anime, manga, game, novel, drama...) is the canon character: write the items from canon's version as the card sets it, when you know canon well. The card wins only where it clearly rewrites canon; a short or generic card description (\"kind\", \"cold\") is a summary of canon. Never fill gaps with the genre's stock archetype, and if you do not know canon well, stay with the card.",
@@ -249,8 +249,8 @@ function analysisSystemPrompt(settings, forcedKind = null) {
         '1. layers — the two-layer reading:',
         '   - surface: how the character presents to others (behaviour, manner).',
         '   - desire: what they actually want underneath.',
-        '   - fear: the fear or wound that drives them.',
-        '   - self_deception: a false belief they hold about themselves that the story could challenge.',
+        '   - fear: the fear or wound that drives them, only when the card or lorebook shows one; otherwise "".',
+        '   - self_deception: a false belief they hold about themselves that the story could challenge, only when the card supports it; otherwise "".',
         "2. pairs — 2 or 3 pairs of the character's own values that collide. For each pair:",
         '   - a, b: short names of the two values (1-4 words each).',
         '   - lean: integer 0-100, how strongly they choose a over b by default (100 = always a, 50 = torn).',
@@ -439,7 +439,7 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
         source === 'chat'
             ? 'A short note for you, the author, on what moves {{char}} as they are now in this story. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.'
             : 'A short note for you, the author, on what moves {{char}}, read from the card. It sharpens your picture of this one person; the card, the chat, and the rules above still decide everything.',
-        'It is not a conscience and not a script: none of it is stated, recited, listed, or analysed on the page, and none of it turns into guilt, moral weighing, or self-explanation. It shows only through what {{char}} does and says, in the voice the style section sets.',
+        'It is not a conscience and not a script: none of it is stated, recited, listed, or analysed on the page, and none of it turns into guilt, moral weighing, self-explanation, a recap of their past, or narration about what kind of person they are. It shows only through what {{char}} does and says now, in the voice the style section sets.',
         // 🔧 캐해 리셋 (v8.0.5) pulls {{char}} back to the card; "the chat wins" would pull the other way
         reset
             ? 'The character reset is on: what has happened and what has grown stays, but how {{char}} shows it comes back to the card. Use this note for what moves them, never for the drifted manner of recent replies.'
@@ -465,7 +465,7 @@ export function buildInsightPrompt(profile, mvuState, { source = 'card', soft = 
     });
     if (!soft) for (const r of profile.relations ?? []) lines.push(`- With ${r.who}: ${r.shows}`);
     if (lines.length) out.push('', ...lines);
-    out.push('', 'Most replies touch one of these or none. People surprise themselves; let them.', '</character_insight>');
+    out.push('', 'Most replies touch one of these or none; the rest stays offstage until a moment calls for it. People surprise themselves; let them.', '</character_insight>');
     return out.join('\n');
 }
 
